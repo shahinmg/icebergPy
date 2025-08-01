@@ -10,7 +10,7 @@ outfiles/
 *.mat
 *.tif
 bed_for_slater
-*.nc
+#*.nc
 sam/stac_nc/
 *.xml
 dev/
