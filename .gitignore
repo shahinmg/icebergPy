@@ -5,8 +5,8 @@ figs/
 outfiles/
 *.png
 *.pdf
-*.gpkg
-*.pkl
+#*.gpkg
+#*.pkl
 *.mat
 *.tif
 bed_for_slater
