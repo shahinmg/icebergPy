@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Aug  9 11:54:53 2023
+Created on Tue Aug  5 14:43:39 2025
 
 @author: laserglaciers
 """
+
 import melt_functions as ice_melt
 import numpy as np
 import xarray as xr
 import scipy.io as sio
-from plot_icebergshape import plot_icebergshape
-import matplotlib.pyplot as plt
-from scipy.interpolate import interp1d, interp2d
-from matplotlib import cm,colors
 import pickle
 import geopandas as gpd
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os
-#NOTE THIS SEPT23 IS ME TESTING TO SEE IF I DID A WRONG NANMEAN ISTEAD OF A NANSUM
+
 
 # set up initial surface lengths and depth intervals
 L = np.arange(50,1450,50)
@@ -25,12 +21,16 @@ dz = 5
 
 
 # input data paths
-ctd_path = '/media/laserglaciers/upernavik/iceberg_py/infiles/ctdSFjord.mat'
-adcp_path = '/media/laserglaciers/upernavik/iceberg_py/infiles/ADCP_cosine_BeccaSummer.mat'
+ctd_path = '/media/laserglaciers/upernavik/iceberg_py/dev/thermal_forcing_calculations/csv/avg_temp_sal_sermilik_fjord.csv'
+# ctd_path = '/media/laserglaciers/upernavik/iceberg_py/dev/thermal_forcing_calculations/csv/min_temp_sal_sermilik_fjord.csv'
+# ctd_path = '/media/laserglaciers/upernavik/iceberg_py/dev/thermal_forcing_calculations/csv/max_temp_sal_sermilik_fjord.csv'
+
+
+adcp_path = '/media/laserglaciers/upernavik/iceberg_py/dev/infiles/ADCP_cosine_BeccaSummer.mat'
 
 
 
-gdf_pkl_path = '/media/laserglaciers/upernavik/iceberg_py/outfiles/helheim/iceberg_geoms/dim_with_bin/'
+gdf_pkl_path = '/media/laserglaciers/upernavik/iceberg_py/dev/outfiles/helheim/iceberg_geoms/dim_with_bin/'
 gdf_list = sorted([gdf for gdf in os.listdir(gdf_pkl_path) if gdf.endswith('gpkg')])
 os.chdir(gdf_pkl_path)
 
@@ -38,22 +38,17 @@ os.chdir(gdf_pkl_path)
 for berg_file in gdf_list:
     
     date_str = berg_file[:10]
-    op_berg_model = '/media/laserglaciers/upernavik/iceberg_py/outfiles/helheim/berg_model/'
-    if not os.path.exists(op_berg_model):
-        os.makedirs(op_berg_model)
+    ctd = gpd.pd.read_csv(ctd_path)
     
-    
-    ctd = sio.loadmat(ctd_path)
-    
-    depth = ctd['serm']['mar2010'][0][0][0][0][0]
-    temp = ctd['serm']['mar2010'][0][0][0][0][1]
-    salt = ctd['serm']['mar2010'][0][0][0][0][2]
+    depth = np.array( ctd['depth'].values).reshape(1, len(ctd['depth']) )
+    temp = np.array( ctd['temp'].values ).reshape(len(ctd['temp']), 1 )
+    salt = np.array( ctd['salt'].values ).reshape(len(ctd['salt']), 1 )
     
     ctd_ds = xr.Dataset({'depth':(['Z','X'], depth),
                          'temp': (['tZ','tX'], temp),
                          'salt': (['tZ','tX'], salt)
                          }
-        )
+                        )
     
     # force temp to be constant
     # avg_temp35 = np.ones(ctd_ds.temp.shape)*3.5
@@ -72,120 +67,43 @@ for berg_file in gdf_list:
     timespan = 86400.0 * 30.0 # 1 month
     
     
-    # u_rel_tests = [0.01, 0.05, 0.1] #slow, medium, fast from Jackson 2016 and Davison 2020
+    # u_rel_tests = [0.02, 0.07, 0.15] #slow, medium, fast from Jackson 2016 and Davison 2020
     # tf_test = [5.73, 6.67, 7.62] # from histogram of TF from Slater
     
-    u_rel_tests = [0.05] #slow, medium, fast from Jackson 2016 and Davison 2020
-    tf_test = [6.67] # from histogram of TF from Slater
+    u_rel_tests = [0.15] #slow, medium, fast inspired Jackson 2016 and Davison 2020  [0.02, 0.07, 0.15]
     
-    u_rel_tf_zip = list(zip(u_rel_tests, tf_test))
     
-    for u_rel, constant_tf in u_rel_tf_zip:
+    for u_rel in u_rel_tests:
     
         factor = 1 # 4 is from Jackson et al 2020 to increase transfer coeffs
-        use_constant_tf = True
+        use_constant_tf = False
         do_constantUrel = True
-        # constant_tf = 6.6788244 # from Slater 2022 nature geoscience
-        constant_tf = constant_tf # from Slater 2022 nature geoscience
-        u_rel = u_rel
-        
-        
+        constant_tf = None 
+
         adcp_ds = xr.Dataset({'zadcp': (['adcpX','adcpY'],adcp['zadcp']),
                               'vadcp': (['adcpX','adcpZ'], adcp['vadcp']),
                               'tadcp': (['adcpY','adcpZ'], adcp['tadcp']),
                               'wvel':  (['adcpY'], np.array([u_rel]))
-            })
-        
-        
+                              })
         
         
         # run the model for each length class and store in dict
         mberg_dict = {}
         for length in L:
             print(f'Processing Length {length}')
-            # mberg = ice_melt.iceberg_melt(length, dz, timespan, ctd_ds, IceC, Winds, Tair, SWflx, adcp_ds, factor=factor, 
-            #                               use_constant_tf=use_constant_tf, constant_tf = constant_tf)
-            
+
             mberg = ice_melt.iceberg_melt(length, dz, timespan, ctd_ds, IceC, Winds, Tair, SWflx, u_rel, do_constantUrel=do_constantUrel, 
                                           factor=factor, use_constant_tf=use_constant_tf, 
-                                          constant_tf = constant_tf)
-            
+                                          constant_tf = None)
             
             mberg_dict[length] = mberg
         
-        out_file = f'{op_berg_model}{date_str}_urel{u_rel}_TF{constant_tf}_bergs_coeff{factor}_v2.pkl'
-
-        with open(out_file,'wb') as handle:
-            # pickle.dump(mberg_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-            pickle.dump(mberg_dict, handle)
-        
-        
-        # Visualize iceberg geometries
-        # plot_icebergshape(mberg_dict[350])
-        # plot_icebergshape(mberg_dict[1000])
         
         l_heat = 3.34e5 #J kg
         Aww_depth = 150
-        
-        
-        k=mberg_dict[1000].KEEL.sel(time=86400*2)
-        ul = mberg_dict[1000].UWL.sel(Z=slice(Aww_depth,k.data[0]),time=86400*2)
-        uw = mberg_dict[1000].UWL.sel(Z=slice(Aww_depth,k.data[0]),time=86400*2)
-        A = uw * ul
-        
-        
-        mfw = mberg_dict[1000].i_mfreew.sel(Z=slice(Aww_depth,k.data[0]), time=86400*2)
-        mtw = mberg_dict[1000].i_mturbw.sel(Z=slice(Aww_depth,k.data[0]), time=86400*2)
-        Mfreew = mberg_dict[1000].Mfreew.sel(Z=slice(Aww_depth,k.data[0]), time=86400*2)
-        Mturbw = mberg_dict[1000].Mturbw.sel(Z=slice(Aww_depth,k.data[0]), time=86400*2)
-        Urel = mberg_dict[1000].Urel.sel(Z=slice(Aww_depth,k.data[0]), time=86400*2)
-        
-        
-        
-        
-        total_iceberg_melt = np.mean(Mfreew + Mturbw, axis=1)
-        Aww_melt_rate = np.mean(mtw + mfw, axis=1) / 86400 # convrrt to meters/second
-        
-        # not_hf = Aww_melt_rate * l_heat * 1000
-        Qib = total_iceberg_melt * l_heat * 1000 # iceberg heatflux per z layer
-        Qib_sum = np.sum(Qib)
-        
-        ctdz = ctd_ds.depth
-        ctdz_flat = ctdz.T.to_numpy().flatten()
-        # calculate heat flux of Aww
-        fjord_width = 5000
-        fjord_depth = ctdz_flat.max()
         Cp = 3980 # specific heat capactiy J/kgK
         p_sw = 1027 # kg/m3
         p_fw = 1000 # freshwater density kg/m3
-        
-        # need to get the temperature and depths at the same spacing
-        t = ctd_ds.temp.data
-        s = ctd_ds.salt.data
-        salt = np.nanmean(s,axis=1)
-        temp = np.nanmean(t,axis=1)
-        # constants from Jenkins
-        a = -5.73e-2 # Salinity contribution
-        b = 8.32e-2 # constant
-        c = -7.61e-4 # pressure contribution C/dbar
-        
-        T_fp = a * salt + b + c * ctdz_flat # Freezing point temperature
-        T_Tfp = temp - T_fp # temperature - freezing point in celsius
-        T_Tfp_k = T_Tfp + 273.15 # convert from celsius to kelvin
-        
-        z_coord_flat = np.arange(dz,600+dz,dz) # deepest iceberg is defined here 
-        z_coord = z_coord_flat.reshape(len(z_coord_flat),1)
-        temp_func = interp1d(ctdz_flat, T_Tfp_k)
-        T_Tfp_k_Z = temp_func(mberg_dict[1000].Z.data).reshape(len(z_coord_flat),1)
-        T_Tfp_k_Z = xr.DataArray(data=T_Tfp_k_Z, name='T_Tfp_k', coords = {"Z":z_coord_flat},  dims=["Z","X"])
-        
-        fjord_widths = xr.DataArray(data=np.array([fjord_width]*120).reshape(len(z_coord_flat),1),
-                                    name='fjord_widths', coords = {"Z":z_coord_flat},  dims=["Z","X"])
-        Urel2 = mberg_dict[1000].Urel.sel(time=86400*2)
-        integrand=T_Tfp_k_Z*Urel2*(fjord_widths*5)
-        integrand_sum=np.sum(integrand.sel(Z=slice(Aww_depth,None)))
-        Qaww = integrand_sum.data * (Cp*p_sw)
-        
         
         # Heat flux figure per layer per size of iceberg
         Qib_dict = {}
@@ -206,6 +124,17 @@ for berg_file in gdf_list:
             
             Qib_dict[length] = Qib
             total_melt_dict[length] = total_iceberg_melt
+        
+        
+        op_berg_model = f'iceberg_classes_output/factor_{factor}/'
+        if not os.path.exists(op_berg_model):
+            os.makedirs(op_berg_model)
+            
+        out_file = f'{op_berg_model}{date_str}_urel{u_rel}_TF{constant_tf}_bergs_coeff{factor}_v2.pkl'
+
+        with open(out_file,'wb') as handle:
+            # pickle.dump(mberg_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(mberg_dict, handle)
         
         
         print(f'berg_file: {berg_file}')
@@ -293,18 +222,9 @@ for berg_file in gdf_list:
         
         urel_str = str(u_rel).split('.')[1]
         
-        op = f'/media/laserglaciers/upernavik/iceberg_py/outfiles/helheim/Qib_melt_flux_only_aw_test/coeff_{factor}_urel05_test/'
+        op = f'iceberg_model_output/coeff_{factor}_urel{urel_str}_test/'
         if not os.path.exists(op):
             os.makedirs(op)
         
-        Q_ib_ds.to_netcdf(f'{op}{date_str}_hel_coeff_{factor}_constant_tf_{constant_tf}_constant_UREL_{u_rel}.nc')
+        Q_ib_ds.to_netcdf(f'{op}{date_str}_hel_coeff_{factor}_CTD_constant_UREL_{urel_str}.nc')
         
-    
-    # Q_ib_ds = xr.Dataset(
-    #     data_vars= dict(Qib = (['x'],qib_total, {'units':'W'}),
-    #                     iceberg_date = (date,{'sensor':'S2A'}),
-    #                     iceberg_concentraion = ('high',{'desc':'Qualatative assesment'}))
-        
-    #     ) 
-
-
