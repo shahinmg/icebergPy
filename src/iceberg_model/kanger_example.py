@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Aug  5 14:43:39 2025
-
-@author: laserglaciers
-"""
-
 import melt_functions as ice_melt
 import numpy as np
 import xarray as xr
@@ -18,26 +10,35 @@ import os
 # set up initial surface lengths and depth intervals
 L = np.arange(50,1450,50)
 dz = 5
-
+FJORD = 'kanger'
+run_type = 'avg' # min, avg, max
 
 # input data paths
-ctd_path = '/media/laserglaciers/upernavik/iceberg_py/dev/thermal_forcing_calculations/csv/avg_temp_sal_sermilik_fjord.csv'
-# ctd_path = '/media/laserglaciers/upernavik/iceberg_py/dev/thermal_forcing_calculations/csv/min_temp_sal_sermilik_fjord.csv'
-# ctd_path = '/media/laserglaciers/upernavik/iceberg_py/dev/thermal_forcing_calculations/csv/max_temp_sal_sermilik_fjord.csv'
+ctd_path = f'/home/m484s199/iceberg_py/dev/thermal_forcing_calculations/csv/{run_type}_temp_sal_kanger.csv'
+# ctd_path = '/home/m484s199/iceberg_py/dev/thermal_forcing_calculations/csv/csv/min_temp_sal_sermilik_fjord.csv'
+# ctd_path = '/home/m484s199/iceberg_py/dev/thermal_forcing_calculations/csv/max_temp_sal_sermilik_fjord.csv'
 
 
-adcp_path = '/media/laserglaciers/upernavik/iceberg_py/dev/infiles/ADCP_cosine_BeccaSummer.mat'
+adcp_path = '/home/m484s199/iceberg_py/dev/infiles/ADCP_cosine_BeccaSummer.mat'
 
 
 
-gdf_pkl_path = '/media/laserglaciers/upernavik/iceberg_py/dev/outfiles/helheim/iceberg_geoms/dim_with_bin/'
+gdf_pkl_path = f'/home/m484s199/iceberg_py/dev/outfiles/{FJORD}/iceberg_geoms/clean_final_depths/'
 gdf_list = sorted([gdf for gdf in os.listdir(gdf_pkl_path) if gdf.endswith('gpkg')])
+
+out_dir = '/home/m484s199/iceberg_py/dev/outfiles/'
 os.chdir(gdf_pkl_path)
+
+vel_dict = {'min': 0.02,
+            'avg': 0.07,
+            'max':0.15} #m/s
 
 
 for berg_file in gdf_list:
     
     date_str = berg_file[:10]
+    
+    
     ctd = gpd.pd.read_csv(ctd_path)
     
     depth = np.array( ctd['depth'].values).reshape(1, len(ctd['depth']) )
@@ -70,7 +71,7 @@ for berg_file in gdf_list:
     # u_rel_tests = [0.02, 0.07, 0.15] #slow, medium, fast from Jackson 2016 and Davison 2020
     # tf_test = [5.73, 6.67, 7.62] # from histogram of TF from Slater
     
-    u_rel_tests = [0.15] #slow, medium, fast inspired Jackson 2016 and Davison 2020  [0.02, 0.07, 0.15]
+    u_rel_tests = [vel_dict[run_type]] #slow, medium, fast inspired Jackson 2016 and Davison 2020  [0.02, 0.07, 0.15]
     
     
     for u_rel in u_rel_tests:
@@ -125,12 +126,12 @@ for berg_file in gdf_list:
             Qib_dict[length] = Qib
             total_melt_dict[length] = total_iceberg_melt
         
-        
-        op_berg_model = f'iceberg_classes_output/factor_{factor}/'
+
+        op_berg_model = f'{out_dir}iceberg_classes_output/{FJORD}/urel{u_rel}/factor_{factor}_run_type_{run_type}/'
         if not os.path.exists(op_berg_model):
             os.makedirs(op_berg_model)
             
-        out_file = f'{op_berg_model}{date_str}_urel{u_rel}_TF{constant_tf}_bergs_coeff{factor}_v2.pkl'
+        out_file = f'{op_berg_model}{date_str}_urel{u_rel}_ctd_data_bergs_coeff{factor}.pkl'
 
         with open(out_file,'wb') as handle:
             # pickle.dump(mberg_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -222,9 +223,9 @@ for berg_file in gdf_list:
         
         urel_str = str(u_rel).split('.')[1]
         
-        op = f'iceberg_model_output/coeff_{factor}_urel{urel_str}_test/'
+        op = f'{out_dir}iceberg_model_output/{FJORD}/coeff_{factor}_urel{urel_str}_test_run_type_{run_type}/'
         if not os.path.exists(op):
             os.makedirs(op)
         
-        Q_ib_ds.to_netcdf(f'{op}{date_str}_hel_coeff_{factor}_CTD_constant_UREL_{urel_str}.nc')
+        Q_ib_ds.to_netcdf(f'{op}{date_str}_{FJORD}_coeff_{factor}_CTD_constant_UREL_{urel_str}.nc')
         
