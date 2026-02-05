@@ -18,3 +18,7 @@ dev/
 
 data/*
 !data/.gitignore
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/
+.virtual_documents/
