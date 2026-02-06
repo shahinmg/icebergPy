@@ -4,7 +4,7 @@ icebergPy is a Python-based iceberg melt rate model based on the [Moon et al., 2
 
 ## How to use the model
 
-Within `src/iceberg_model/` there is a `.py` file named `melt_functions.py`. This file contains all the model physics. The other files are example scripts to run the model with the naming convention `{glacier_name}_example.py`.
+Within `src/iceberg_model/` there is `melt_functions.py`. This file contains all the model physics. The other files are example scripts to run the model with the naming convention `{glacier_name}_example.py`.
 
 ## Recreate Figures 
 
