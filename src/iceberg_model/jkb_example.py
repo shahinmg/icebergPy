@@ -15,12 +15,7 @@ run_type = 'avg' # min, avg, max
 
 # input data paths
 ctd_path = f'../../data/ctd_data/{run_type}_temp_sal_jkb.csv'
-# ctd_path = '/home/m484s199/iceberg_py/dev/thermal_forcing_calculations/csv/csv/min_temp_sal_sermilik_fjord.csv'
-# ctd_path = '/home/m484s199/iceberg_py/dev/thermal_forcing_calculations/csv/max_temp_sal_sermilik_fjord.csv'
-
-
 adcp_path = '../../data/adcp_template/ADCP_template.mat'
-
 
 
 gdf_pkl_path = f'../../data/iceberg_geoms/{FJORD}/'
