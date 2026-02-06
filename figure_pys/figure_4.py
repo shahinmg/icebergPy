@@ -23,9 +23,8 @@ import xarray as xr
 import os
 from matplotlib.patches import Ellipse
 
-os.chdir('/home/m484s199/iceberg_py/dev/')
-Q_ib_grid = np.load('./fig_pys/main_data/Qib_parameter_space/Qib_param_space_urel07_TF_1_8.npy')
-vol_arr = pd.read_pickle('./fig_pys/main_data/Qib_parameter_space/vol_series_urel07_TF1_8.pkl')
+Q_ib_grid = np.load('../data/Qib_paramter_space/Qib_param_space_urel07_TF_1_8.npy')
+vol_arr = pd.read_pickle('../data/Qib_paramter_space/Qib_parameter_space/vol_series_urel07_TF1_8.pkl')
 
 #%%
 
@@ -78,10 +77,7 @@ cbar.set_label('Q$_{ib}$ (GW)', size=14)
 
 #%%
 # Get Volume from model run.
-# /home/m484s199/iceberg_py/dev/outfiles/iceberg_model_output/helheim/coeff_1_urel07_test_diff_berg/
-# helheim_urel_05_path = '../outfiles/helheim/Qib_melt_flux_fiamma_ctd_sermilik_fjord/coeff_1_urel07_test/'
-# /home/m484s199/iceberg_py/dev/outfiles/iceberg_model_output/helheim/coeff_1_urel07_test/
-helheim_avg_path= './fig_pys/main_data/iceberg_model_output/helheim/avg/'
+helheim_avg_path= '../data/iceberg_model_output/helheim/avg/'
 
 nc_list = [nc for nc in os.listdir(helheim_avg_path) if nc.endswith('nc')]
 
@@ -116,8 +112,8 @@ axs.text(hel_vol_mean-0.6e9, temp_mean, 'Helheim Fjord')
 
 
 #%%
-# /home/m484s199/iceberg_py/dev/outfiles/iceberg_model_output/jkb/coeff_1_urel07_test/
-jkb_avg_path = './fig_pys/main_data/iceberg_model_output/jkb/avg/'
+
+jkb_avg_path = '../data/iceberg_model_output/jkb/avg/'
 
 nc_list = [nc for nc in os.listdir(jkb_avg_path) if nc.endswith('nc')]
 
@@ -167,8 +163,7 @@ axs.annotate(
 
 #%%
 
-
-kanger_avg_path = './fig_pys/main_data/iceberg_model_output/kanger/avg/'
+kanger_avg_path = '../data/iceberg_model_output/kanger/avg/'
 
 nc_list = [nc for nc in os.listdir(kanger_avg_path) if nc.endswith('nc')]
 
@@ -208,7 +203,7 @@ axs.text(kanger_vol_mean-0.55e9, temp_mean-0.11, 'Kangerlussuaq\nFjord',fontsize
 
 #%%
 
-upernavik_avg_path = './fig_pys/main_data/iceberg_model_output/upernavik/avg/'
+upernavik_avg_path = '../data/iceberg_model_output/upernavik/avg/'
 
 
 nc_list = [nc for nc in os.listdir(upernavik_avg_path) if nc.endswith('nc')]

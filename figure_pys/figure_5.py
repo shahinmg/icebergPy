@@ -21,13 +21,11 @@ import types
 import os
 import string
 
-berg_model_path_1 = '/home/m484s199/iceberg_py/dev/outfiles/iceberg_classes_output/helheim/factor_1/urel0.07/'
+berg_model_path_1 = '../data/iceberg_classes_output/helheim/avg/'
 
-iceberg_geom_path = '/home/m484s199/iceberg_py/dev/outfiles/helheim/iceberg_geoms/clean_geoms_with_depth/'
+iceberg_geom_path = '../data/iceberg_geoms/gpkg/helheim/'
 
 berg_model_list_c1 = sorted([pkl for pkl in os.listdir(berg_model_path_1) if pkl.endswith('pkl')])
-
-
 
 
 colors_viridis = cm.viridis(np.linspace(0,1,len(berg_model_list_c1)))
@@ -288,7 +286,7 @@ def get_xr_das(model_list, chdir):
 
         # fig.align_xlabels()
         # plt.tight_layout()
-        op = '/home/m484s199/iceberg_py/dev/figs/'
+        op = './figs/'
         # plt.subplots_adjust(right=0.2)
         fig.savefig(f'{op}Qib_depth_updated_3_panel.pdf', dpi=300, bbox_inches='tight')
         fig.savefig(f'{op}Qib_depth_updated_3_panel.pdf', dpi=300, pad_inches=0.03)
