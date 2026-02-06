@@ -15,8 +15,7 @@ sam/stac_nc/
 *.xml
 dev/
 *.pth
-notebook/stac_items/*
-!notebook/stac_items/.gitignore
+notebook/stac_items/*pkl
 
 data/*
 !data/.gitignore
