@@ -45,7 +45,7 @@ def get_xr_das(model_list, chdir):
             mberg_dict = pickle.load(src)
             
         # iceberg_geom_file = f'{iceberg_geom_path}{date}-icebergs_helheim_keel_depth.gpkg'
-        iceberg_geom_file = f'{iceberg_geom_path}{date}_keels.gpkg'
+        iceberg_geom_file = f'{iceberg_geom_path}{date}_all_merged_dims.gpkg'
 
         icebergs_gdf = gpd.read_file(iceberg_geom_file)
         vc = icebergs_gdf['binned'].value_counts()
