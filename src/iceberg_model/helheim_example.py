@@ -25,8 +25,6 @@ gdf_list = sorted([gdf for gdf in os.listdir(gdf_pkl_path) if gdf.endswith('gpkg
 out_dir = '../../data/'
 
 
-os.chdir(gdf_pkl_path)
-
 vel_dict = {'min': 0.02,
             'avg': 0.07,
             'max':0.15} #m/s
@@ -136,7 +134,8 @@ for berg_file in gdf_list:
             pickle.dump(mberg_dict, handle)
         
         
-        print(f'berg_file: {berg_file}')
+        berg_path = f'{gdf_pkl_path}{berg_file}'
+        icebergs_gdf = gpd.read_file(berg_path)
         icebergs_gdf = gpd.read_file(berg_file)
         
         vc = icebergs_gdf['binned'].value_counts()
