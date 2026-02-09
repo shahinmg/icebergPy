@@ -23,8 +23,8 @@ import xarray as xr
 import os
 from matplotlib.patches import Ellipse
 
-Q_ib_grid = np.load('../data/Qib_paramter_space/Qib_param_space_urel07_TF_1_8.npy')
-vol_arr = pd.read_pickle('../data/Qib_paramter_space/Qib_parameter_space/vol_series_urel07_TF1_8.pkl')
+Q_ib_grid = np.load('../data/Qib_parameter_space/Qib_param_space_urel07_TF_1_8.npy')
+vol_arr = pd.read_pickle('../data/Qib_parameter_space/vol_series_urel07_TF1_8.pkl')
 
 #%%
 
@@ -256,9 +256,11 @@ axs.annotate(
 
 plt.tight_layout()
 
-op = './figs/'
+op = f'./figs/'
+if not os.path.exists(op):
+    os.makedirs(op)
 
-fig.savefig(f'{op}Qib_u_rel_07_clean_bergs_ctd.pdf', dpi=300, bbox_inches='tight', transparent=True)
-fig.savefig(f'{op}Qib_u_rel_07_clean_bergs_ctd.svg', dpi=300, bbox_inches='tight', transparent=True)
+# fig.savefig(f'{op}Qib_u_rel_07_clean_bergs_ctd.pdf', dpi=300, bbox_inches='tight', transparent=True)
+# fig.savefig(f'{op}Qib_u_rel_07_clean_bergs_ctd.svg', dpi=300, bbox_inches='tight', transparent=True)
 
 

@@ -23,16 +23,16 @@ import string
 
 berg_model_path_1 = '../data/iceberg_classes_output/helheim/avg/'
 
-iceberg_geom_path = '../data/iceberg_geoms/gpkg/helheim/'
+iceberg_geom_path = '../data/iceberg_geoms/helheim/'
 
 berg_model_list_c1 = sorted([pkl for pkl in os.listdir(berg_model_path_1) if pkl.endswith('pkl')])
 
 
 colors_viridis = cm.viridis(np.linspace(0,1,len(berg_model_list_c1)))
 
-def get_xr_das(model_list, chdir):
+def get_xr_das(model_list):
     
-    os.chdir(chdir)
+    # os.chdir(chdir)
     fig, ax = plt.subplots(1,3,sharey='row',figsize=(9, 7))
     
     total_melt_list = [40, 41, 48, 89, 70] # come from Table 1
@@ -40,7 +40,7 @@ def get_xr_das(model_list, chdir):
     for time_idx, berg_model_file in enumerate(model_list):
         
         date = berg_model_file[:10]
-    
+        berg_model_file = f'{berg_model_path_1}{berg_model_file}'
         with open(berg_model_file, 'rb') as src:
             mberg_dict = pickle.load(src)
             
@@ -286,17 +286,19 @@ def get_xr_das(model_list, chdir):
 
         # fig.align_xlabels()
         # plt.tight_layout()
-        op = './figs/'
+        op = f'./figs/'
+        if not os.path.exists(op):
+            os.makedirs(op)
         # plt.subplots_adjust(right=0.2)
-        fig.savefig(f'{op}Qib_depth_updated_3_panel.pdf', dpi=300, bbox_inches='tight')
-        fig.savefig(f'{op}Qib_depth_updated_3_panel.pdf', dpi=300, pad_inches=0.03)
+        # fig.savefig(f'{op}Qib_depth_updated_3_panel.pdf', dpi=300, bbox_inches='tight')
+        # fig.savefig(f'{op}Qib_depth_updated_3_panel.pdf', dpi=300, pad_inches=0.03)
 
     return fig, ax
 
 #%% plot melt rate per day figure per iceberg class 
 
 # get_xr_das(berg_model_list, berg_model_path)
-out_fig, out_ax = get_xr_das(berg_model_list_c1, berg_model_path_1)
+out_fig, out_ax = get_xr_das(berg_model_list_c1)
 # 
 
 

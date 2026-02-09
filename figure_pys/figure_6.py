@@ -11,11 +11,12 @@ import numpy as np
 from matplotlib.ticker import ScalarFormatter
 from matplotlib.patches import Ellipse
 from matplotlib import cm,colors
+import os
 
 fig, ax1 = plt.subplots(1,1, figsize=(8,4))
 # Data for the bar plot
 categories = [r'$\Delta t$ 50 days', r'$\Delta t$ 150 days']
-Qaw_150dt = [100, 110, 110, 110, 100]
+Qaw_150dt = [100, 110, 110, 110, 100] #from tables
 Qaw_50dt = [300, 330, 320, 330, 310]
 
 values = [np.mean(Qaw_50dt), np.mean(Qaw_150dt)] # 50 day dt, 150 day dt
@@ -62,8 +63,9 @@ ax1.tick_params(axis='y', labelsize=14)
 
 ax1.legend(fontsize=16)
 
+op = f'./figs/'
+if not os.path.exists(op):
+    os.makedirs(op)
 
-op = '/home/m484s199/iceberg_py/dev/figs/'
 plt.tight_layout()
-plt.savefig(f'{op}heatbudget_bar_plot.pdf', dpi=300, transparent=True)
-# plt.savefig(f'{op}heatbudget_bar_plot_Qaw_parameter_space_CTD_Test.png', dpi=300, transparent=False)
+# plt.savefig(f'{op}heatbudget_bar_plot.pdf', dpi=300, transparent=True)
