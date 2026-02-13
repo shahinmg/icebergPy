@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Aug  2 11:00:25 2023
-
-@author: laserglaciers
-"""
-
 import numpy as np
 import numpy.matlib
 from scipy.interpolate import interp1d, interp2d
