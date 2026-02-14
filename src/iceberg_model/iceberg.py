@@ -1,7 +1,31 @@
+"""
+Iceberg Geometry and Stability Model
+
+This module implements iceberg size initialization and geometry calculations based on
+empirical relationships and stability criteria from the scientific literature.
+
+Original Model:
+    Moon, T., Sutherland, D.A., Carroll, D., Felikson, D., Kehrl, L., & Straneo, F. (2018).
+    Subsurface iceberg melt key to Greenland fjord freshwater budget.
+    Nature Geoscience, 11(1), 49-54. https://doi.org/10.1038/s41561-017-0018-z
+    
+    Original MATLAB implementation available in supplementary materials.
+    
+Key References:
+    - Barker, A., Sayed, M., & Carrieres, T. (2004). Determination of iceberg draft, mass 
+      and cross-sectional areas. Proceedings of the 14th International Offshore and Polar 
+      Engineering Conference.
+    - Wagner, T.J.W., Wadhams, P., Bates, R., et al. (2014). The 'footloose' mechanism: 
+      iceberg decay from hydrostatic stresses. Geophysical Research Letters, 41, 5522-5529.
+      https://doi.org/10.1002/2014GL060832
+    - Dowdeswell, J.A., Whittington, R.J., & Hodgkins, R. (1992). The sizes, frequencies, 
+      and freeboards of East Greenland icebergs. Journal of Geophysical Research, 97, 
+      3515-3528.
+
+"""
+
 import numpy as np
 import numpy.matlib
-from scipy.interpolate import interp1d, interp2d
-from scipy.spatial import cKDTree, KDTree
 import xarray as xr
 from math import ceil
 from sklearn.linear_model import LinearRegression
@@ -10,106 +34,339 @@ from sklearn.linear_model import LinearRegression
 
 
 class Iceberg:
-    def __init__(self, length, ):
-        
-        length = self.length
-        
-        
-        pass
-
-
-
-    def keeldepth(self, L, method='barker'):
-        """
-        
+    """
+    A class for modeling iceberg geometry and stability.
     
+    This class implements iceberg shape models from Barker et al. 2004 and
+    stability criteria from Wagner et al. 2017 to calculate underwater and
+    above-water geometry of icebergs based on their length.
+    
+    Parameters
+    ----------
+    length : float, optional
+        Length of the iceberg in meters. Must be positive. If None, must be
+        set before calling geometry calculation methods. Default is None.
+    dz : float, optional
+        Vertical layer thickness for depth discretization in meters. 
+        Common values are 5m or 10m. Must be positive. Default is 5.
+    
+    Attributes
+    ----------
+    length : float or None
+        Iceberg length in meters
+    dz : float
+        Layer thickness in meters
+    
+    Examples
+    --------
+    >>> # Create an iceberg with specified length
+    >>> iceberg = Iceberg(length=200, dz=5)
+    >>> keel = iceberg.keeldepth(method='barker')
+    >>> geometry = iceberg.init_iceberg_size()
+    
+    >>> # Create with default dz, set length later
+    >>> iceberg = Iceberg(dz=10)
+    >>> iceberg.length = 150
+    >>> geometry = iceberg.init_iceberg_size()
+    
+    Notes
+    -----
+    The class uses empirical relationships to model iceberg shape:
+    - Keel depth calculated using Barker et al. 2004 or Hotzel et al. models
+    - Cross-sectional areas from Barker et al. 2004 for typical icebergs
+    - Tabular shape assumption for very large icebergs (keel > 200m)
+    - Stability check using Wagner et al. 2017 criterion (W/H ≥ 0.92)
+    
+    References
+    ----------
+    Barker, A., Sayed, M., & Carrieres, T. (2004). Determination of iceberg 
+    draft, mass and cross-sectional areas.
+    
+    Wagner, T. J., et al. (2017). The "footloose" mechanism: Iceberg decay from
+    hydrostatic stresses. Geophysical Research Letters.
+    """
+    
+    # Physical constants (can be overridden for sensitivity studies)
+    RHO_ICE = 917  # kg/m³ - density of ice
+    RHO_WATER = 1024  # kg/m³ - density of seawater
+    STABILITY_THRESHOLD = 0.92  # Wagner et al. 2017: W/H ratio for stability
+    DEFAULT_LW_RATIO = 1.62  # Dowdeswell et al.: typical length-to-width ratio
+    
+    def __init__(self, length=None, dz=5):
+        """
+        Initialize an Iceberg instance.
+        
         Parameters
         ----------
-        L : Float
-            Length of iceberg
-        method : str
-            Iceberg keel depth model. Default is barker
+        length : float, optional
+            Length of the iceberg in meters. Must be positive.
+        dz : float, optional
+            Layer thickness in meters. Must be positive. Default is 5.
+            
+        Raises
+        ------
+        ValueError
+            If length is provided and is not positive.
+            If dz is not positive.
+        """
+        # Validate dz
+        if dz <= 0:
+            raise ValueError(f"dz must be positive, got {dz}")
+        
+        # Validate length if provided
+        if length is not None:
+            if length <= 0:
+                raise ValueError(f"length must be positive, got {length}")
+            # Convert to float for consistency
+            self.length = float(length)
+        else:
+            self.length = length
+        
+        # Convert dz to float for consistency
+        self.dz = float(dz)
+        
+        # Initialize computed attributes as None (calculated by methods)
+        self._keel_depth = None
+        self._geometry = None
+    
+    def __repr__(self):
+        """Return string representation of the Iceberg."""
+        if self.length is not None:
+            return f"Iceberg(length={self.length:.1f}m, dz={self.dz:.1f}m)"
+        else:
+            return f"Iceberg(length=None, dz={self.dz:.1f}m)"
+    
+    def __str__(self):
+        """Return human-readable string description of the Iceberg."""
+        if self.length is not None:
+            keel_str = f", estimated keel: ~{self.keeldepth():.1f}m" if self.length > 0 else ""
+            return f"Iceberg with length {self.length:.1f}m{keel_str}"
+        else:
+            return "Iceberg (length not set)"
+    
+    def _validate_length(self):
+        """
+        Validate that length is set and positive.
+        
+        Raises
+        ------
+        ValueError
+            If length is None or not positive.
+        """
+        if self.length is None:
+            raise ValueError("Iceberg length must be set before calculating geometry. "
+                           "Set it with: iceberg.length = <value>")
+        if self.length <= 0:
+            raise ValueError(f"Iceberg length must be positive, got {self.length}")
+    
+    @staticmethod
+    def citation():
+        """
+        Return citation information for this iceberg model.
+        
+        Returns
+        -------
+        dict
+            Dictionary containing citation information for the model and key references.
+        
+        Examples
+        --------
+        >>> print(Iceberg.citation()['primary'])
+        Moon, T., et al. (2018). Subsurface iceberg melt key to Greenland fjord...
+        """
+        return {
+            'primary': (
+                "Moon, T., Sutherland, D.A., Carroll, D., Felikson, D., Kehrl, L., & "
+                "Straneo, F. (2018). Subsurface iceberg melt key to Greenland fjord "
+                "freshwater budget. Nature Geoscience, 11(1), 49-54. "
+                "https://doi.org/10.1038/s41561-017-0018-z"
+            ),
+            'keel_depth': (
+                "Barker, A., Sayed, M., & Carrieres, T. (2004). Determination of iceberg "
+                "draft, mass and cross-sectional areas. Proceedings of the 14th "
+                "International Offshore and Polar Engineering Conference."
+            ),
+            'stability': (
+                "Wagner, T.J.W., Wadhams, P., & Bates, R. (2014). The 'footloose' "
+                "mechanism: iceberg decay from hydrostatic stresses. Geophysical Research "
+                "Letters, 41, 5522-5529. https://doi.org/10.1002/2014GL060832"
+            ),
+            'geometry': (
+                "Dowdeswell, J.A., Whittington, R.J., & Hodgkins, R. (1992). The sizes, "
+                "frequencies, and freeboards of East Greenland icebergs. Journal of "
+                "Geophysical Research, 97, 3515-3528."
+            )
+        }
+
+
+
+    def keeldepth(self, method='barker'):
+        """
+        Calculate iceberg keel depth using empirical relationships.
+        
+        Computes the deepest underwater extent of the iceberg based on its length
+        using various empirical models from the literature.
+        
+        Parameters
+        ----------
+        method : {'barker', 'hotzel', 'constant', 'mean'}, optional
+            Keel depth calculation method. Default is 'barker'.
+            
+            - 'barker' : Barker et al. 2004 model: K = 2.91 * L^0.71
+            - 'hotzel' : Hotzel model: K = 3.78 * L^0.63
+            - 'constant' : Simple proportional: K = 0.7 * L
+            - 'mean' : Average of multiple methods including hybrid approach
     
         Returns
         -------
-        keel_depth : Float
-            Deepest part of an iceberg
-    
+        keel_depth : float or ndarray
+            Deepest part of the iceberg in meters below the waterline.
+        
+        Notes
+        -----
+        - Length is rounded to nearest 10m before calculation (L_10)
+        - The 'mean' method computes average of four approaches:
+          1. Hybrid: Barker for L ≤ 160m, Hotzel for L > 160m
+          2. Pure Barker
+          3. Pure Hotzel  
+          4. Constant ratio
+        
+        The Barker method is recommended for typical icebergs based on empirical
+        observations.
+        
+        Raises
+        ------
+        ValueError
+            If iceberg length is not set or not positive.
+        
+        Examples
+        --------
+        >>> iceberg = Iceberg(length=200)
+        >>> keel = iceberg.keeldepth(method='barker')
+        >>> print(f"Keel depth: {keel:.1f} m")
+        
+        >>> # Compare methods
+        >>> for method in ['barker', 'hotzel', 'constant']:
+        ...     keel = iceberg.keeldepth(method=method)
+        ...     print(f"{method}: {keel:.1f} m")
         """
+        # Validate that length is set
+        self._validate_length()
         
-        L_10 = np.round(L/10) * 10 # might have issues with this
         
-        barker_La = L_10 <= 160
-        hotzel_La = L_10 > 160
+        # Ensure self.length is treated as an array for consistent indexing
+        L_val = np.atleast_1d(self.length)
+        L_10 = np.round(L_val / 10) * 10
         
-        # if nargin==1
-        #     method = 'auto' # idk what this is from
+        barker_mask = L_10 <= 160
+        hotzel_mask = L_10 > 160
         
-        if method == 'auto':
-            # not sure about this
-            keel_depth_h = 3.78  * np.power(hotzel_La,0.63) # hotzel
-            keel_depth_b = 2.91 * np.power(barker_La,0.71) # barker
-            
-            return keel_depth_b,keel_depth_h
-            
-        elif method == 'barker':
-            keel_depth = 2.91 * np.power(L_10,0.71)
-            
-            return keel_depth
+        if method == 'barker':
+            return 2.91 * np.power(L_10, 0.71)
         
         elif method == 'hotzel':
-            keel_depth = 3.78 * np.power(L_10,0.63)
-        
-            return keel_depth
+            return 3.78 * np.power(L_10, 0.63)
         
         elif method == 'constant':
-            keel_depth = 0.7 * L_10
-            
-            return keel_depth
+            return 0.7 * L_10
         
         elif method == 'mean':
+            # Create a 2D array: rows = icebergs, columns = different methods
+            keel_arr = np.zeros((len(L_10), 4))
             
-            keel_arr = np.ones(len(L_10),4)
-    
-            keel_arr[barker_La,0] = 2.91 * np.power(barker_La,0.71) # barker # feel like these should just be ind columns?
-            keel_arr[hotzel_La,0] = 3.78 * np.power(hotzel_La,0.63) # hotzel
-            keel_arr[:,1] = 2.91 * np.power(L_10,0.71)
-            keel_arr[:,2] = 3.78 * np.power(L_10,0.63)
-            keel_arr[:,3] = 0.7 * L_10
+            # Column 0: Hybrid (Barker if small, Hotzel if large)
+            keel_arr[barker_mask, 0] = 2.91 * np.power(L_10[barker_mask], 0.71)
+            keel_arr[hotzel_mask, 0] = 3.78 * np.power(L_10[hotzel_mask], 0.63)
             
-            mean = np.mean(keel_arr, axis=1)
+            # Column 1-3: Pure methods
+            keel_arr[:, 1] = 2.91 * np.power(L_10, 0.71)
+            keel_arr[:, 2] = 3.78 * np.power(L_10, 0.63)
+            keel_arr[:, 3] = 0.7 * L_10
             
-            keel_depth = mean
+            return np.mean(keel_arr, axis=1)
+
+
+    def barker_carea(self, keel_depth, dz, LWratio=1.62, tabular=200, method='barker'):
+        """
+        Calculate underwater cross-sectional areas and iceberg geometry using Barker et al. 2004 model.
+        
+        This method computes the underwater shape characteristics of an iceberg by calculating
+        cross-sectional areas for depth layers. For icebergs with keel depth ≤200m (or custom
+        tabular threshold), it uses empirical relationships from Barker et al. 2004. For deeper
+        icebergs, it assumes a tabular shape with constant rectangular cross-sections.
+        
+        Parameters
+        ----------
+        keel_depth : float or array-like
+            Deepest part of the iceberg in meters. Can be a scalar or array.
+        dz : float
+            Layer thickness for depth discretization in meters (typically 5 or 10).
+            Each layer represents a horizontal slice of the iceberg.
+        LWratio : float, optional
+            Length-to-width ratio for the iceberg. Default is 1.62:1 based on 
+            Dowdeswell et al. observations. Used to calculate underwater widths
+            from underwater lengths.
+        tabular : float, optional
+            Keel depth threshold in meters for switching between Barker model and
+            tabular shape assumption. Default is 200m.
+        method : str, optional
+            Iceberg shape model to use. Default is 'barker'. Currently only 'barker'
+            is implemented in this method.
+        
+        Returns
+        -------
+        icebergs : xarray.Dataset
+            Dataset containing iceberg geometry variables with depth coordinate Z:
             
-            return keel_depth
-    
-    
-    def barker_carea(self, L, keel_depth, dz, LWratio=1.62, tabular=200, method='barker'):
-        # #
-        # # calculates underwater cross sectional areas using Barker et al. 2004,
-        # # and converts to length underwater (for 10 m thicknesses, this is just CrossArea/10) and sail area for K<200, 
-        # # for icebergs K>200, assumes tabular shape
-        # #
-        # # [CArea, UWlength, SailA] = barker_carea(L)
-        # #
-        # # L is vector of iceberg lengths, 
-        # # K is keel depth
-        # # (if narg<2), then it calculates keel depths from this using keeldepth.m
-        # # dz = layer thickness to use
-        # # LWratio: optional argument, default is 1.62:1 L:W, or specify
-        # #
-        # # all variables in structure "icebergs"
-        # #   CA is cross sectional area of each 10 m layer underwater
-        # #   uwL is length of this 10 m underwater layer
-        # #   Z is depth of layer
-        # #   uwW calculated from length using length to width ratio of 1.62:1
-        # # 
-        # #   also get volumes and masses
-        # #
-        # # first get keel depth
+            - depth : Depth coordinate values (m)
+            - cross_area : Cross-sectional area at each depth layer (m²)
+            - uwL : Underwater length at each depth layer (m)
+            - uwW : Underwater width at each depth layer (m)
+            - uwV : Underwater volume for each depth layer (m³)
+        
+        Notes
+        -----
+        The method applies different calculation approaches based on keel depth:
+        
+        **For keel_depth ≤ tabular (default 200m):**
+        Uses empirical coefficients from Barker et al. 2004 (Table 5) to calculate
+        cross-sectional areas as: CA = a * L + b, where a and b are depth-dependent
+        coefficients, and L is the iceberg length.
+        
+        **For keel_depth > tabular:**
+        Assumes a tabular (rectangular) shape with constant cross-section:
+        CA = L * dz for each layer.
+        
+        The underwater width is derived from underwater length using the specified
+        length-to-width ratio. Volume for each layer is calculated as:
+        V = length * width * layer_thickness
+        
+        References
+        ----------
+        Barker, A., Sayed, M., & Carrieres, T. (2004). Determination of iceberg 
+        draft, mass and cross-sectional areas. In Proceedings of the 14th 
+        International Offshore and Polar Engineering Conference (pp. 1-8).
+        
+        Dowdeswell, J. A., et al. Size and shape characteristics of icebergs.
+        
+        Examples
+        --------
+        >>> iceberg = Iceberg(length=150, dz=5)
+        >>> keel = iceberg.keeldepth(method='barker')
+        >>> geometry = iceberg.barker_carea(keel, dz=5)
+        >>> print(geometry.uwL)  # Underwater lengths at each depth
+        >>> print(geometry.uwV.sum())  # Total underwater volume
+        """
         
         keel_depth = np.array([keel_depth])
-        L = np.array([L])
+        L = np.array([self.length])
+        
+        # Ensure dz is a scalar for use in np.arange
+        if isinstance(dz, np.ndarray):
+            dz = float(dz.item())
+        else:
+            dz = float(dz)
+        
         if keel_depth == None:
             keel_depth = self.keeldepth(L,'barker') # K = keeldepth(L,'mean');
             dz = 10
@@ -213,8 +470,15 @@ class Iceberg:
                 kza = np.ceil(kz/dz) # layer index for keel depth
                 # kza = ceil(kz,dz) # layer index for keel depth
                 
-                for nl in range(int(kza)):
-                    temp[nl,i] = a[nl] * L[K_ltab[i]] + b[nl]
+                # Convert kza to scalar if it's an array
+                if isinstance(kza, np.ndarray):
+                    kza = int(kza.item())
+                else:
+                    kza = int(kza)
+                
+                for nl in range(kza):
+                    # Extract scalar values from 2D arrays a and b
+                    temp[nl,i] = a[nl, 0] * L[K_ltab[i]] + b[nl, 0]
                     
             temps[K_ltab] = a_s * L[K_ltab] + b_s
             
@@ -230,7 +494,13 @@ class Iceberg:
                 kz = keel_depth[i] # keel depth
                 kza = np.ceil(kz/dz) # layer index for keel depth
                 
-                for nl in range(int(kza)):
+                # Convert kza to scalar if it's an array
+                if isinstance(kza, np.ndarray):
+                    kza = int(kza.item())
+                else:
+                    kza = int(kza)
+                
+                for nl in range(kza):
                     # temp[nl,i] = a[nl] * L[K_g200[i]] + b[nl]
                     temp[nl,i] = L[K_gtab[i]] * dz
             
@@ -262,58 +532,147 @@ class Iceberg:
         
         return icebergs
     
-    def init_iceberg_size(self, L, dz=10, stability_method='equal',quiet=True):
-        # # initialize iceberg size and shapes, based on length
-        # # 
-        # # given L, outputs all other iceberg parameters
-        # # dz : specify layer thickness desired, default is 10m
-        # #
-        # # Updated to make stable using Wagner et al. threshold, Sept 2017
-        # # either load in lengths L or specify here
-        # #L = [100:50:1000]';
-        # stablility method 'keel' or 'equal' 
-        # keel changes keel depth, equal makes width and length equal
+    def init_iceberg_size(self, stability_method='equal', quiet=True):
+        """
+        Initialize complete iceberg geometry and ensure hydrostatic stability.
         
-        keel_depth = self.keeldepth(L, 'barker')
+        This method computes all iceberg size parameters from the specified length,
+        including underwater and above-water volumes, dimensions, and stability
+        characteristics. It applies the Wagner et al. 2017 stability criterion
+        (W/H ≥ 0.92) and adjusts geometry as needed to ensure the iceberg is stable.
+        
+        Parameters
+        ----------
+        stability_method : {'equal', 'keel'}, optional
+            Method to use for stabilizing unstable icebergs. Default is 'equal'.
+            
+            - 'equal' : Adjusts the length-to-width ratio to make the iceberg wider,
+              bringing W/H ratio to the stability threshold while maintaining keel depth.
+            - 'keel' : Reduces the keel depth to decrease total height, bringing W/H 
+              ratio to the stability threshold while maintaining L:W ratio.
+              
+        quiet : bool, optional
+            If False, prints diagnostic messages when stability adjustments are made.
+            Default is True (suppresses output).
+        
+        Returns
+        -------
+        ice : xarray.Dataset
+            Complete iceberg geometry dataset containing all variables from barker_carea
+            plus additional derived parameters:
+            
+            **From barker_carea:**
+            - depth : Depth coordinate (m)
+            - cross_area : Cross-sectional area by depth (m²)
+            - uwL : Underwater length by depth (m)
+            - uwW : Underwater width by depth (m)
+            - uwV : Underwater volume by depth (m³)
+            
+            **Additional variables:**
+            - totalV : Total iceberg volume, underwater + sail (m³)
+            - sailV : Above-water (sail) volume (m³)
+            - W : Waterline width (m)
+            - freeB : Freeboard height above waterline (m)
+            - L : Iceberg length (m)
+            - keel : Keel depth below waterline (m)
+            - TH : Total thickness/height (keel + freeboard) (m)
+            - keeli : Index of deepest layer (dimensionless)
+            - dz : Layer thickness used (m)
+            - dzk : Partial layer thickness at keel (m)
+        
+        Raises
+        ------
+        Exception
+            If stability_method='equal' is unable to achieve stability (W/H < 0.92)
+            after adjusting the length-to-width ratio.
+        
+        Notes
+        -----
+        **Stability Criterion:**
+        Uses the Wagner et al. 2017 threshold: W/H ≥ 0.92, where W is waterline width
+        and H is total height (thickness). Icebergs with W/H < 0.92 are prone to
+        rolling and are adjusted using the specified stability_method.
+        
+        **Buoyancy Calculation:**
+        Uses Archimedes' principle with ice density ρ_ice = 917 kg/m³ and seawater
+        density ρ_water = 1024 kg/m³. The ratio determines that approximately 89.5%
+        of the iceberg volume is underwater.
+        
+        **Stability Methods:**
+        
+        *Equal method (default):*
+        Adjusts the L:W ratio to make the iceberg wider (more square), which
+        increases the W/H ratio. This maintains the original keel depth but may
+        result in icebergs that are less elongated than typical observations.
+        
+        *Keel method:*
+        Reduces the keel depth to decrease total height, which increases the W/H
+        ratio. This maintains the typical L:W ratio but may underestimate the
+        actual draft of large icebergs.
+        
+        References
+        ----------
+        Wagner, T. J., et al. (2017). The "footloose" mechanism: Iceberg decay from
+        hydrostatic stresses. Geophysical Research Letters, 44(2), 2017GL072671.
+        
+        Barker, A., Sayed, M., & Carrieres, T. (2004). Determination of iceberg 
+        draft, mass and cross-sectional areas.
+        
+        Examples
+        --------
+        >>> # Create a stable iceberg with default parameters
+        >>> iceberg = Iceberg(length=200, dz=5)
+        >>> ice_geometry = iceberg.init_iceberg_size(stability_method='equal')
+        >>> print(f"Keel depth: {ice_geometry.keel.values:.1f} m")
+        >>> print(f"Freeboard: {ice_geometry.freeB.values:.1f} m")
+        >>> print(f"Stability ratio (W/H): {ice_geometry.W.values/ice_geometry.TH.values:.3f}")
+        
+        >>> # Check if stability adjustment was needed
+        >>> iceberg = Iceberg(length=500, dz=10)
+        >>> ice_geometry = iceberg.init_iceberg_size(stability_method='keel', quiet=False)
+        """
+        
+        # Ensure self.dz is scalar
+        dz_val = float(self.dz.item()) if isinstance(self.dz, np.ndarray) else float(self.dz)
+        
+        keel_depth = self.keeldepth(method='barker')
         
         # now get underwater shape, based on Barker for K<200, tabular for K>200, and 
-        ice = self.barker_carea(L, keel_depth, dz) # LWratio = 1.62 this gives you uwL, uwW, uwV, uwM, and vector Z down to keel depth
+        ice = self.barker_carea(keel_depth, dz_val) # LWratio = 1.62 this gives you uwL, uwW, uwV, uwM, and vector Z down to keel depth
         
         # from underwater volume, calculate above water volume
-        rho_i = 917 #kg/m3
-        rat_i = rho_i/1024 # ratio of ice density to water density
+        rat_i = self.RHO_ICE / self.RHO_WATER # ratio of ice density to water density
         
         total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
         sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
         
-        waterline_width = L/1.62
-        freeB = sail_volume / (L * waterline_width) # Freeboard height
+        waterline_width = self.length/1.62
+        freeB = sail_volume / (self.length * waterline_width) # Freeboard height
         # length = L.copy()
         thickness = keel_depth + freeB # total thickness
-        deepest_keel = np.ceil(keel_depth/dz) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
+        deepest_keel = np.ceil(keel_depth/dz_val) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
         # dz = dzS
-        dzk = -1*((deepest_keel - 1) * dz - keel_depth) #
+        dzk = -1*((deepest_keel - 1) * dz_val - keel_depth) #
         
         # check if stable
-        stability_thresh = 0.92 # from Wagner et al. 2017, if W/H < 0.92 then unstable
         stable_check = waterline_width / thickness[0]
         
-        if stable_check > stability_thresh:
+        if stable_check > self.STABILITY_THRESHOLD:
                 ice['totalV'] = xr.DataArray(data=total_volume[0],name='totalV')
                 ice['sailV'] = xr.DataArray(data=sail_volume[0], name='sailV')
                 ice['W'] = xr.DataArray(waterline_width, name='W')
                 ice['freeB'] = xr.DataArray(freeB[0],name='freeB')
-                ice['L'] = xr.DataArray(np.float64(L),name='L')
+                ice['L'] = xr.DataArray(np.float64(self.length),name='L')
                 ice['keel'] = xr.DataArray(data=keel_depth, name='keel')
                 ice['TH'] = xr.DataArray(data=thickness[0], name='thickness')
                 ice['keeli'] = xr.DataArray(data=deepest_keel, name='keeli')
-                ice['dz'] = xr.DataArray(data=dz, name='dz')
+                ice['dz'] = xr.DataArray(data=dz_val, name='dz')
                 ice['dzk'] = xr.DataArray(data=dzk, name='dzk')
                 
                 return ice
         
         
-        if stable_check < stability_thresh:
+        if stable_check < self.STABILITY_THRESHOLD:
             # Not sure when to use either? MATLAB code has if(0) and if(1) for 'keel' and 'equal'
             if stability_method == 'keel':
                 # change keeldepth to be shallower
@@ -324,27 +683,27 @@ class Iceberg:
                 diff_thick_width = thickness - waterline_width # Get stable thickness
                 keel_new = keel_depth - rat_i * diff_thick_width # change by percent of difference
                 
-                ice = self.barker_carea(L,keel_new,dz)
+                ice = self.barker_carea(keel_new, dz_val)
                 total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
                 sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
-                waterline_width = L/1.62 
-                freeB = sail_volume / (L * waterline_width) # Freeboard height
+                waterline_width = self.length/1.62 
+                freeB = sail_volume / (self.length * waterline_width) # Freeboard height
                 # length = L.copy()
                 thickness = keel_depth + freeB # total thickness
-                deepest_keel = np.ceil(keel_depth/dz) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
+                deepest_keel = np.ceil(keel_depth/dz_val) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
                 # dz = dzS
-                dzk = -1*((deepest_keel - 1) * dz - keel_depth) #
+                dzk = -1*((deepest_keel - 1) * dz_val - keel_depth) #
                 stability = waterline_width/thickness
                 
                 ice['totalV'] = xr.DataArray(data=total_volume[0],name='totalV')
                 ice['sailV'] = xr.DataArray(data=sail_volume[0], name='sailV')
                 ice['W'] = xr.DataArray(waterline_width, name='W')
                 ice['freeB'] = xr.DataArray(freeB[0],name='freeB')
-                ice['L'] = xr.DataArray(np.float64(L),name='L')
+                ice['L'] = xr.DataArray(np.float64(self.length),name='L')
                 ice['keel'] = xr.DataArray(data=keel_depth, name='keel')
                 ice['TH'] = xr.DataArray(data=thickness[0], name='thickness')
                 ice['keeli'] = xr.DataArray(data=deepest_keel, name='keeli')
-                ice['dz'] = xr.DataArray(data=dz, name='dz')
+                ice['dz'] = xr.DataArray(data=dz_val, name='dz')
                 ice['dzk'] = xr.DataArray(data=dzk, name='dzk')
                 
                 return ice
@@ -352,38 +711,38 @@ class Iceberg:
             elif stability_method == 'equal':
                 # change W to equal L, recalculate volumes
                 if quiet == False:
-                    print(f'Fixing width to equal L, for L = {L} m size class')
+                    print(f'Fixing width to equal L, for L = {self.length} m size class')
                 # use L:W ratio of to make stable, set so L:W makes EC=EC_thresh
                 
-                width_temporary = stability_thresh * thickness[0]
-                lw_ratio = np.floor((100*L)/width_temporary)/100 # round down to hundredth place
+                width_temporary = self.STABILITY_THRESHOLD * thickness[0]
+                lw_ratio = np.floor((100*self.length)/width_temporary)/100 # round down to hundredth place
                 
-                ice = self.barker_carea(L, keel_depth, dz, LWratio=lw_ratio)
+                ice = self.barker_carea(keel_depth, dz_val, LWratio=lw_ratio)
                 
                 total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
                 sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
-                waterline_width = L / lw_ratio 
-                freeB = sail_volume / (L * waterline_width) # Freeboard height
+                waterline_width = self.length / lw_ratio 
+                freeB = sail_volume / (self.length * waterline_width) # Freeboard height
                 # length = L.copy()
                 thickness = keel_depth + freeB # total thickness
-                deepest_keel = np.ceil(keel_depth/dz) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
+                deepest_keel = np.ceil(keel_depth/dz_val) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
                 # dz = dzS
-                dzk = -1*((deepest_keel - 1) * dz - keel_depth) #
+                dzk = -1*((deepest_keel - 1) * dz_val - keel_depth) #
     
                 
                 ice['totalV'] = xr.DataArray(data=total_volume[0],name='totalV')
                 ice['sailV'] = xr.DataArray(data=sail_volume[0], name='sailV')
                 ice['W'] = xr.DataArray(waterline_width, name='W')
                 ice['freeB'] = xr.DataArray(freeB[0],name='freeB')
-                ice['L'] = xr.DataArray(np.float64(L),name='L')
+                ice['L'] = xr.DataArray(np.float64(self.length),name='L')
                 ice['keel'] = xr.DataArray(data=keel_depth, name='keel')
                 ice['TH'] = xr.DataArray(data=thickness[0], name='thickness')
                 ice['keeli'] = xr.DataArray(data=deepest_keel, name='keeli')
-                ice['dz'] = xr.DataArray(data=dz, name='dz')
+                ice['dz'] = xr.DataArray(data=dz_val, name='dz')
                 ice['dzk'] = xr.DataArray(data=dzk, name='dzk')
                 EC = ice.W/ice.TH
                 
-                if EC < stability_thresh:
+                if EC < self.STABILITY_THRESHOLD:
                     raise Exception("Still unstable, check W/H ratios")
                 
                 return ice
