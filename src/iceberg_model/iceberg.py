@@ -27,10 +27,6 @@ Key References:
 import numpy as np
 import numpy.matlib
 import xarray as xr
-from math import ceil
-from sklearn.linear_model import LinearRegression
-
-
 
 
 class Iceberg:
