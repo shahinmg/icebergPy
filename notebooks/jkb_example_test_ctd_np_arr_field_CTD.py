@@ -10,20 +10,24 @@ import os
 # set up initial surface lengths and depth intervals
 L = np.arange(50,1450,50)
 dz = 5
-FJORD = 'helheim'
-run_type = 'min' # min, avg, max
+FJORD = 'jkb'
+run_type = 'avg' # min, avg, max
 
 # input data paths
-ctd_path = f'../../data/ctd_data/{run_type}_temp_sal_sermilik_fjord.csv'
-adcp_path = '../../data/adcp_template/ADCP_template.mat'
+ctd_path = f'/home/m484s199/iceberg_py/dev/thermal_forcing_calculations/csv/{run_type}_temp_sal_jkb.csv'
+# ctd_path = '/home/m484s199/iceberg_py/dev/thermal_forcing_calculations/csv/csv/min_temp_sal_sermilik_fjord.csv'
+# ctd_path = '/home/m484s199/iceberg_py/dev/thermal_forcing_calculations/csv/max_temp_sal_sermilik_fjord.csv'
+
+
+adcp_path = '/home/m484s199/iceberg_py/dev/infiles/ADCP_cosine_BeccaSummer.mat'
 
 
 
-gdf_pkl_path = f'../../data/iceberg_geoms/{FJORD}/'
+gdf_pkl_path = f'/home/m484s199/iceberg_py/dev/outfiles/{FJORD}/iceberg_geoms/clean_final_depths/'
 gdf_list = sorted([gdf for gdf in os.listdir(gdf_pkl_path) if gdf.endswith('gpkg')])
 
-out_dir = '../../data/'
-
+out_dir = '/home/m484s199/iceberg_py/dev/outfiles/'
+os.chdir(gdf_pkl_path)
 
 vel_dict = {'min': 0.02,
             'avg': 0.07,
@@ -123,7 +127,7 @@ for berg_file in gdf_list:
             total_melt_dict[length] = total_iceberg_melt
         
 
-        op_berg_model = f'{out_dir}iceberg_classes_output_bug_fix/{FJORD}/{run_type}/'
+        op_berg_model = f'{out_dir}iceberg_classes_output/{FJORD}/urel{u_rel}/factor_{factor}_run_type_{run_type}/'
         if not os.path.exists(op_berg_model):
             os.makedirs(op_berg_model)
             
@@ -134,8 +138,8 @@ for berg_file in gdf_list:
             pickle.dump(mberg_dict, handle)
         
         
-        berg_path = f'{gdf_pkl_path}{berg_file}'
-        icebergs_gdf = gpd.read_file(berg_path)
+        print(f'berg_file: {berg_file}')
+        icebergs_gdf = gpd.read_file(berg_file)
         
         vc = icebergs_gdf['binned'].value_counts()
         
@@ -219,7 +223,7 @@ for berg_file in gdf_list:
         
         urel_str = str(u_rel).split('.')[1]
         
-        op = f'{out_dir}iceberg_model_output_bug_fix/{FJORD}/{run_type}/'
+        op = f'{out_dir}iceberg_model_output/{FJORD}/coeff_{factor}_urel{urel_str}_test_run_type_{run_type}/'
         if not os.path.exists(op):
             os.makedirs(op)
         
