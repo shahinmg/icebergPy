@@ -22,25 +22,11 @@ Key References:
       and freeboards of East Greenland icebergs. Journal of Geophysical Research, 97, 
       3515-3528.
 
-
 """
 
 import numpy as np
 import numpy.matlib
-from scipy.interpolate import interp1d, interp2d
-from scipy.spatial import cKDTree, KDTree
 import xarray as xr
-from math import ceil
-from sklearn.linear_model import LinearRegression
-
-# Import constants module
-try:
-    from . import constants as const
-except ImportError:
-    # Fallback for when running as standalone script
-    import constants as const
-
-
 
 
 class Iceberg:
@@ -96,11 +82,11 @@ class Iceberg:
     hydrostatic stresses. Geophysical Research Letters.
     """
     
-    # Physical constants (imported from constants module)
-    RHO_ICE = const.RHO_ICE
-    RHO_WATER = const.RHO_SEAWATER
-    STABILITY_THRESHOLD = const.STABILITY_THRESHOLD_WH
-    DEFAULT_LW_RATIO = const.DEFAULT_LENGTH_TO_WIDTH_RATIO
+    # Physical constants (can be overridden for sensitivity studies)
+    RHO_ICE = 917  # kg/m³ - density of ice
+    RHO_WATER = 1024  # kg/m³ - density of seawater
+    STABILITY_THRESHOLD = 0.92  # Wagner et al. 2017: W/H ratio for stability
+    DEFAULT_LW_RATIO = 1.62  # Dowdeswell et al.: typical length-to-width ratio
     
     def __init__(self, length=None, dz=5):
         """
@@ -149,13 +135,7 @@ class Iceberg:
     def __str__(self):
         """Return human-readable string description of the Iceberg."""
         if self.length is not None:
-            if self.length > 0:
-                keel_depth = self.keeldepth()
-                # Convert to scalar if it's an array
-                keel_value = float(keel_depth) if isinstance(keel_depth, np.ndarray) else keel_depth
-                keel_str = f", estimated keel: ~{keel_value:.1f}m"
-            else:
-                keel_str = ""
+            keel_str = f", estimated keel: ~{self.keeldepth():.1f}m" if self.length > 0 else ""
             return f"Iceberg with length {self.length:.1f}m{keel_str}"
         else:
             return "Iceberg (length not set)"
@@ -235,9 +215,8 @@ class Iceberg:
     
         Returns
         -------
-        keel_depth : float
+        keel_depth : float or ndarray
             Deepest part of the iceberg in meters below the waterline.
-            Returns a scalar float for single iceberg.
         
         Notes
         -----
@@ -270,45 +249,37 @@ class Iceberg:
         # Validate that length is set
         self._validate_length()
         
-        # Store whether input was scalar
-        input_is_scalar = np.isscalar(self.length)
         
         # Ensure self.length is treated as an array for consistent indexing
         L_val = np.atleast_1d(self.length)
-        L_10 = np.round(L_val / const.KEEL_DEPTH_ROUNDING_MULTIPLE) * const.KEEL_DEPTH_ROUNDING_MULTIPLE
+        L_10 = np.round(L_val / 10) * 10
         
-        barker_mask = L_10 <= const.BARKER_HOTZEL_THRESHOLD
-        hotzel_mask = L_10 > const.BARKER_HOTZEL_THRESHOLD
+        barker_mask = L_10 <= 160
+        hotzel_mask = L_10 > 160
         
         if method == 'barker':
-            result = const.BARKER_COEFFICIENT_A * np.power(L_10, const.BARKER_EXPONENT_B)
+            return 2.91 * np.power(L_10, 0.71)
         
         elif method == 'hotzel':
-            result = const.HOTZEL_COEFFICIENT_A * np.power(L_10, const.HOTZEL_EXPONENT_B)
+            return 3.78 * np.power(L_10, 0.63)
         
         elif method == 'constant':
-            result = const.CONSTANT_KEEL_RATIO * L_10
+            return 0.7 * L_10
         
         elif method == 'mean':
             # Create a 2D array: rows = icebergs, columns = different methods
             keel_arr = np.zeros((len(L_10), 4))
             
             # Column 0: Hybrid (Barker if small, Hotzel if large)
-            keel_arr[barker_mask, 0] = const.BARKER_COEFFICIENT_A * np.power(L_10[barker_mask], const.BARKER_EXPONENT_B)
-            keel_arr[hotzel_mask, 0] = const.HOTZEL_COEFFICIENT_A * np.power(L_10[hotzel_mask], const.HOTZEL_EXPONENT_B)
+            keel_arr[barker_mask, 0] = 2.91 * np.power(L_10[barker_mask], 0.71)
+            keel_arr[hotzel_mask, 0] = 3.78 * np.power(L_10[hotzel_mask], 0.63)
             
             # Column 1-3: Pure methods
-            keel_arr[:, 1] = const.BARKER_COEFFICIENT_A * np.power(L_10, const.BARKER_EXPONENT_B)
-            keel_arr[:, 2] = const.HOTZEL_COEFFICIENT_A * np.power(L_10, const.HOTZEL_EXPONENT_B)
-            keel_arr[:, 3] = const.CONSTANT_KEEL_RATIO * L_10
+            keel_arr[:, 1] = 2.91 * np.power(L_10, 0.71)
+            keel_arr[:, 2] = 3.78 * np.power(L_10, 0.63)
+            keel_arr[:, 3] = 0.7 * L_10
             
-            result = np.mean(keel_arr, axis=1)
-        
-        # Return scalar if input was scalar
-        if input_is_scalar and result.size == 1:
-            return float(result.item())
-        else:
-            return result
+            return np.mean(keel_arr, axis=1)
 
 
     def barker_carea(self, keel_depth, dz, LWratio=1.62, tabular=200, method='barker'):
@@ -459,8 +430,8 @@ class Iceberg:
             a = newa/2
             b = newb/2
         
-        a_s = const.SAIL_AREA_COEFFICIENT_A  # for sail area table 4 barker et al 2004
-        b_s = const.SAIL_AREA_COEFFICIENT_B    
+        a_s = 28.194; # for sail area table 4 barker et al 2004
+        b_s = -1420.2;    
         
         
     
@@ -507,8 +478,8 @@ class Iceberg:
                     
             temps[K_ltab] = a_s * L[K_ltab] + b_s
             
-            if L < const.SAIL_AREA_LENGTH_THRESHOLD:
-                temps[L < const.SAIL_AREA_LENGTH_THRESHOLD] = const.SAIL_AREA_QUADRATIC_COEFF * np.power(L[L < const.SAIL_AREA_LENGTH_THRESHOLD], 2)  # fix for L<65, barker 2004
+            if L < 65:
+                temps[L<65] = 0.077 * np.power(L[L<65],2) # fix for L<65, barker 2004
         
         
         # then do icebergs D>200 for tabular
@@ -529,7 +500,7 @@ class Iceberg:
                     # temp[nl,i] = a[nl] * L[K_g200[i]] + b[nl]
                     temp[nl,i] = L[K_gtab[i]] * dz
             
-            temps[K_gtab] = const.TABULAR_ICEBERG_COEFFICIENT * L[K_gtab] * keel_depth[K_gtab]
+            temps[K_gtab] = 0.1211 * L[K_gtab] * keel_depth[K_gtab]
             
         
         cross_area = xr.DataArray(data=temp, coords = {"Z":z_coord_flat}, dims=["Z","X"], name="cross_area")
@@ -666,12 +637,12 @@ class Iceberg:
         ice = self.barker_carea(keel_depth, dz_val) # LWratio = 1.62 this gives you uwL, uwW, uwV, uwM, and vector Z down to keel depth
         
         # from underwater volume, calculate above water volume
-        density_ratio = const.DENSITY_RATIO_ICE_TO_WATER  # ratio of ice density to water density
+        rat_i = self.RHO_ICE / self.RHO_WATER # ratio of ice density to water density
         
-        total_volume = (1/density_ratio) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
+        total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
         sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
         
-        waterline_width = self.length / const.DEFAULT_LENGTH_TO_WIDTH_RATIO
+        waterline_width = self.length/1.62
         freeB = sail_volume / (self.length * waterline_width) # Freeboard height
         # length = L.copy()
         thickness = keel_depth + freeB # total thickness
@@ -706,12 +677,12 @@ class Iceberg:
                     
                 
                 diff_thick_width = thickness - waterline_width # Get stable thickness
-                keel_new = keel_depth - density_ratio * diff_thick_width # change by percent of difference
+                keel_new = keel_depth - rat_i * diff_thick_width # change by percent of difference
                 
                 ice = self.barker_carea(keel_new, dz_val)
-                total_volume = (1/density_ratio) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
+                total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
                 sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
-                waterline_width = self.length / const.DEFAULT_LENGTH_TO_WIDTH_RATIO 
+                waterline_width = self.length/1.62 
                 freeB = sail_volume / (self.length * waterline_width) # Freeboard height
                 # length = L.copy()
                 thickness = keel_depth + freeB # total thickness
@@ -744,7 +715,7 @@ class Iceberg:
                 
                 ice = self.barker_carea(keel_depth, dz_val, LWratio=lw_ratio)
                 
-                total_volume = (1/density_ratio) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
+                total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
                 sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
                 waterline_width = self.length / lw_ratio 
                 freeB = sail_volume / (self.length * waterline_width) # Freeboard height

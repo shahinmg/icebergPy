@@ -345,6 +345,25 @@ def barker_carea(L, keel_depth, dz, LWratio=1.62, tabular=200, method='barker'):
     temps = np.nan * np.ones((1, len(L)))
     
     
+    # # K_l200 = keel_depth[keel_depth<200] # might cause an issue?
+    # K_ltab = np.where(keel_depth<=tabular)[0] # get indices of keel_depth < tabular
+    # # if(~isempty(ind))
+    # if K_ltab.size != 0: # check if empty
+    #     for i in range(len(K_ltab)):
+            
+    #         kz = keel_depth[i] # keel depth
+    #         # dz_np = np.array([dz],dtype=np.float64)
+    #         kza = np.ceil(kz/dz) # layer index for keel depth
+    #         # kza = ceil(kz,dz) # layer index for keel depth
+            
+    #         for nl in range(int(kza)):
+    #             temp[nl,i] = a[nl] * L[K_ltab[i]] + b[nl]
+                
+    #     temps[K_ltab] = a_s * L[K_ltab] + b_s
+        
+    #     if L < 65:
+    #         temps[L<65] = 0.077 * np.power(L[L<65],2) # fix for L<65, barker 2004
+    
     # K_l200 = keel_depth[keel_depth<200] # might cause an issue?
     K_ltab = np.where(keel_depth<=tabular)[0] # get indices of keel_depth < tabular
     # if(~isempty(ind))
@@ -356,13 +375,17 @@ def barker_carea(L, keel_depth, dz, LWratio=1.62, tabular=200, method='barker'):
             kza = np.ceil(kz/dz) # layer index for keel depth
             # kza = ceil(kz,dz) # layer index for keel depth
             
-            for nl in range(int(kza)):
-                temp[nl,i] = a[nl] * L[K_ltab[i]] + b[nl]
+            # Convert kza to scalar if it's an array
+            if isinstance(kza, np.ndarray):
+                kza = int(kza.item())
+            else:
+                kza = int(kza)
+            
+            for nl in range(kza):
+                # Extract scalar values from 2D arrays a and b
+                temp[nl,i] = a[nl, 0] * L[K_ltab[i]] + b[nl, 0]
                 
         temps[K_ltab] = a_s * L[K_ltab] + b_s
-        
-        if L < 65:
-            temps[L<65] = 0.077 * np.power(L[L<65],2) # fix for L<65, barker 2004
     
     
     # then do icebergs D>200 for tabular
@@ -956,7 +979,7 @@ def iceberg_melt(L,dz,timespan,ctddata,IceConc,WindSpd,Tair,SWflx,Urelative, do_
     iceberg['Mturba'] = xr.DataArray(data=Mturba, name='Mturba', coords = {"time":t},  dims=["X","time"],attrs={'Description':"Integrated Forced convection in air, based on Condron's mitberg formulation",
                                                                                                                  'Units': 'm3/s'})
     
-    iceberg['Mfreew'] = xr.DataArray(data=Mfreew, name='Mfreew', coords = {"time":t,"Z":ice_init[0].Z.values},  dims=["Z","X","time"], attrs={'Description':"Integrated buoyant convection along sidewalls in water, based on bigg (condron)",
+    iceberg['Mfreew'] = xr.DataArray(data=Mturbw, name='Mfreew', coords = {"time":t,"Z":ice_init[0].Z.values},  dims=["Z","X","time"], attrs={'Description':"Integrated buoyant convection along sidewalls in water, based on bigg (condron)",
                                                                                                                  'Units': 'm3/s'})
     
     iceberg['Mtotal'] = xr.DataArray(data=Mtotal, name='Mtotal', coords = {"time":t},  dims=["X","time"], attrs={'Description':"total volume FW for each time step",

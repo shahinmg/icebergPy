@@ -21,8 +21,8 @@ References
 # Densities (kg/m³)
 RHO_ICE = 917                  # Density of glacial ice
 RHO_SEAWATER = 1024           # Typical seawater density
-RHO_FRESHWATER = 1000         # Pure water at 4°C
-RHO_AIR = 1.225               # Air density at sea level, 15°C
+RHO_FRESHWATER = 1000         # fresh water
+RHO_AIR = 1.225               # Air density at sea level
 
 # Derived density ratios
 DENSITY_RATIO_ICE_TO_WATER = RHO_ICE / RHO_SEAWATER  # ~0.895 (89.5% submerged)
