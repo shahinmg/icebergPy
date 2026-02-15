@@ -6,539 +6,285 @@ import xarray as xr
 from math import ceil
 from sklearn.linear_model import LinearRegression
 
-def melt_wave(windu, sst, sea_ice_conc):
-    
-    # % Silva et al eqn for wave erosion term
-    # % Mw = melt_wave(Wind_speed,T_surf, SeaIceConc)
-    # %
-    # % solves for melt rate Mw (in m/s), given
-    # % T_w = surface temp of water
-    # % Wind_u = in m/s (really relative to water speed, but assume Wind >>> water speeds)
-    # % SeaIceC = sea ice concentration in % (0-1)
-    # % 
-    # % this is similar to mitberg wave formulation using the bigg option (after martin and adroft too),
-    # % CIS model uses different formulation
-    
-    
-    sea_state = 1.5 * np.sqrt(windu) + 0.1 * windu
-    IceTerm = 1 + np.cos(np.power(sea_ice_conc,3) * np.pi) # typo in their eqn. 7, should be + sign (See Gladstone et al. 2001)
-    
-    melt = (1/12) * sea_state * IceTerm * (sst + 2) # m/day
-    melt = melt / 86400 # m/second 
-    
-    return melt
+
+# Import constants
+from . import constants as const
 
 
-def melt_solar(solar_rad):
+def melt_wave(wind_speed, sea_surface_temp, sea_ice_concentration):
+    """
+    Calculate wave erosion melt rate using Silva et al. formulation.
     
-    # % Melt from solar radiation in air, based on Condron's mitberg formulation, 
-    # % would affect thickness above water only, assumes constant albedo for now
-    # % 
-    # % M = melt_solar(Srad)
-    # % 
-    # % solves for melt rate M (in m/sec), given
-    # % Srad: solar radiation flux downward (SW and LW), in W/m^2
-    # % - note assumes iceberg albedo is 0.7
-    # % 
+    Parameters
+    ----------
+    wind_speed : float or ndarray
+        Wind speed in m/s (relative to water, assumed Wind >> water speeds)
+    sea_surface_temp : float or ndarray
+        Surface water temperature in °C
+    sea_ice_concentration : float or ndarray
+        Sea ice concentration, fraction 0-1 (0 = no ice, 1 = full coverage)
+    
+    Returns
+    -------
+    melt_rate : float or ndarray
+        Melt rate in m/s
+    
+    References
+    ----------
+    Silva et al., Bigg et al. (1997), Gladstone et al. (2001)
+    
+    """
+    # Wave height estimate from wind speed
+    sea_state = (const.WAVE_HEIGHT_WIND_COEFF_1 * np.sqrt(wind_speed) + 
+                 const.WAVE_HEIGHT_WIND_COEFF_2 * wind_speed)
+    
+    # Ice concentration effect (corrected from paper typo)
+    ice_term = 1 + np.cos(np.power(sea_ice_concentration, 3) * np.pi)
+    
+    # Melt rate: m/day
+    melt_rate = ((1 / const.WAVE_MELT_DIVISOR) * sea_state * ice_term * 
+                 (sea_surface_temp + const.WAVE_MELT_TEMP_OFFSET))
+    
+    # Convert to m/s
+    melt_rate = melt_rate / const.SECONDS_PER_DAY
+    
+    return melt_rate
 
-    latent_heat = 3.33e5 #J/kg
-    rho_i = 917 #kg/m3
-    albedo = 0.7
-    absorbed = 1 - albedo # percentage absorbed
-    
-    melt = absorbed * solar_rad / (rho_i * latent_heat) # m/s
-    
-    return melt
-    
 
-def melt_forcedwater(temp_far, salinity_far, pressure_base, U_rel, factor, use_constant_tf = False, constant_tf = None):
+def melt_solar(solar_radiation):
+    """
+    Calculate melt from solar radiation (above water).
     
-    # % Silva et al eqn, using parameters from Holland and Jenkins
-    # % M = melt_forcedwater(T_far,S_far,P_base,U_rel)
-    # %
-    # % solves for melt rate M (in m/sec), given
-    # % T_far = farfield temp
-    # % S_far = farfield S
-    # % P_base = pressure at base
-    # % U_rel = water speed relative to iceberg surface (this could be the ambient velocity
-    # %             reported by Jenkins' plume model, or a horizontal relative velocity moving past iceberg
-    # % I wonder if U_rel could be terminus velocity for melange??
+    Based on Condron's mitberg formulation. Affects thickness above water only.
+    Assumes constant albedo.
     
-    # % also reports back Tsh and T_fp which is difference between T_far and local fp (Tsh = T_far - (aS_far + b + cP_base))
-    # %
+    Parameters
+    ----------
+    solar_radiation : float or ndarray
+        Solar radiation flux downward (SW and LW) in W/m²
     
+    Returns
+    -------
+    melt_rate : float or ndarray
+        Melt rate in m/s
     
-    # constants from Jenkins
-    a = -5.73e-2 # Salinity contribution
-    b = 8.32e-2 # constant
-    c = -7.61e-4 # pressure contribution C/dbar
+    Notes
+    -----
+    Albedo assumed to be 0.7 for ice
+    """
+    # Energy absorbed = solar flux * (1 - albedo)
+    absorbed_energy = const.SOLAR_ABSORPTION_FRACTION * solar_radiation
     
+    # Convert energy to melt: Q = ρ * L * m  =>  m = Q / (ρ * L)
+    # where Q is heat flux (W/m²), ρ is ice density (kg/m³), L is latent heat (J/kg)
+    melt_rate = absorbed_energy / (const.RHO_ICE * const.LATENT_HEAT_FUSION)
+    
+    return melt_rate  # m/s
 
-    # factor based on adjustments from Jackson et al, 2020 10.1029/2019GL085335
-    GT = 1.1e-3 * factor # 6e-4; %second value in Silva, first in Jenkins model heat transfer coefficient
-    GS = 3.1e-5 * factor # 2.2e-5; %second value in Silva, first in Jenkins model % salt transfer coefficient
+
+def melt_forcedwater(temp_far, salinity_far, pressure_base, velocity_relative, 
+                     factor=None, use_constant_tf=False, constant_tf=None):
+    """
+    Calculate forced convection melt in water (turbulent melt).
     
-    L = 3.35e5  # latent heat of fusion of ice (in J/kg)
-    cw = 3974;  # specific heat of water (J/kg/C)
-    ci = 2009;  # " of ice
-    DT = 15;    # temp difference between iceberg core and bottom surface (this is for Antarctica, maybe less for Greenland?)
+    Uses Silva et al. equation with parameters from Holland and Jenkins.
     
+    Parameters
+    ----------
+    temp_far : float or ndarray
+        Far-field water temperature in °C
+    salinity_far : float or ndarray
+        Far-field salinity in PSU
+    pressure_base : float or ndarray
+        Pressure at base in dbar
+    velocity_relative : float or ndarray
+        Water speed relative to iceberg surface in m/s
+    factor : float, optional
+        Adjustment factor for transfer coefficients (Jackson et al. 2020).
+        Default is 4.
+    use_constant_tf : bool, optional
+        If True, use constant thermal forcing instead of calculating from T/S
+    constant_tf : float, optional
+        Constant thermal forcing value if use_constant_tf is True
+    
+    Returns
+    -------
+    melt_rate : float or ndarray
+        Melt rate in m/s (positive = melting)
+    thermal_forcing : float or ndarray
+        Temperature above freezing point in °C (or constant_tf if specified)
+    freezing_point : float or ndarray or None
+        Freezing point temperature in °C (None if using constant_tf)
+    
+    References
+    ----------
+    Holland & Jenkins (1999), Silva et al., Jackson et al. (2020)
+    """
+    # Use default factor if not provided
+    if factor is None:
+        factor = const.DEFAULT_TRANSFER_COEFFICIENT_FACTOR
+    
+    # Transfer coefficients (adjusted by factor)
+    heat_transfer = const.HEAT_TRANSFER_COEFFICIENT_GT * factor
+    salt_transfer = const.SALT_TRANSFER_COEFFICIENT_GS * factor
+    
+    # Thermal forcing calculation
     if use_constant_tf:
-        T_sh = constant_tf
-        T_fp = None
-        
+        thermal_forcing = constant_tf
+        freezing_point = None
     else:
-        T_fp = a * salinity_far + b + c * pressure_base # Freezing point temperature
-        T_sh = temp_far - T_fp # Temperature above freezing point
+        # Freezing point: T_fp = a*S + b + c*P
+        freezing_point = (const.FREEZING_POINT_SALINITY_COEFF * salinity_far + 
+                         const.FREEZING_POINT_CONSTANT + 
+                         const.FREEZING_POINT_PRESSURE_COEFF * pressure_base)
+        thermal_forcing = temp_far - freezing_point
     
-    # Quadtratic Terms
-    A = (L + DT * ci) / (U_rel * GT * cw)
-    B = -1*((L + DT * ci) * GS/(GT * cw) - a*salinity_far - T_sh)
-    C = -U_rel * GS * T_sh
+    # Quadratic formula coefficients: A*m² + B*m + C = 0
+    A = ((const.LATENT_HEAT_FUSION + const.TEMPERATURE_DIFFERENCE_CORE_SURFACE * const.SPECIFIC_HEAT_ICE) / 
+         (velocity_relative * heat_transfer * const.SPECIFIC_HEAT_WATER))
     
-    ROOT = np.power(B,2) - 4*A*C
-    ROOT = np.where(ROOT<0,np.nan,ROOT)
+    B = -1 * (((const.LATENT_HEAT_FUSION + const.TEMPERATURE_DIFFERENCE_CORE_SURFACE * const.SPECIFIC_HEAT_ICE) * 
+               salt_transfer / (heat_transfer * const.SPECIFIC_HEAT_WATER)) - 
+              const.FREEZING_POINT_SALINITY_COEFF * salinity_far - thermal_forcing)
+    
+    C = -velocity_relative * salt_transfer * thermal_forcing
+    
+    # Solve quadratic equation
+    discriminant = np.power(B, 2) - 4 * A * C
+    discriminant = np.where(discriminant < 0, np.nan, discriminant)
     
     # Find quadratic roots
-    Mtemp1 = (-B + np.sqrt(ROOT)) / (2*A)
-    Mtemp2 = (-B - np.sqrt(ROOT)) / (2*A)
+    root1 = (-B + np.sqrt(discriminant)) / (2 * A)
+    root2 = (-B - np.sqrt(discriminant)) / (2 * A)
     
-    melt = np.minimum(Mtemp1,Mtemp2) # m/sec
+    melt_rate = np.minimum(root1, root2)
     
-    # clean data to remove melt rates below freezing point
-    mask = T_sh < 0
-    melt[mask] = 0
-    nan_mask = np.isnan(melt)
-    melt[nan_mask] = 0
+    # Clean data: remove melt rates when water is below freezing
+    mask = thermal_forcing < 0
+    melt_rate = np.where(mask, 0, melt_rate)
+    melt_rate = np.where(np.isnan(melt_rate), 0, melt_rate)
     
-    #make melt rate positive
-    melt = -1 * melt
+    # Make melt rate positive (convention: positive = melting)
+    melt_rate = -1 * melt_rate
     
-    return melt, T_sh, T_fp
+    return melt_rate, thermal_forcing, freezing_point
 
 
-def melt_forcedair(T_air, U_rel, L):
+def melt_forcedair(air_temp, air_velocity_relative, iceberg_length):
+    """
+    Calculate forced convection melt in air.
     
-    T_ice = -4 # ice temperature
-    Li = 3.33e5 # latent heat of fusion in ice J/kg
-    rho_i = 917 # density of ice
-    air_viscosity = 1.46e-5 # kinematic viscosity of air m2/s idk at what temperature around 15 c
-    air_diffusivity = 2.16e-5 # thermal diffusivity of air m2/s
-    air_conductivity = 0.0249 # thermal condictivity of air at 0 C W/mK watts per meter kelvin at ~ 15 c
-    cold = T_air < 0 # freezing celsius
+    Based on Condron's mitberg formulation using Nusselt number relationships.
     
-    Pr = air_viscosity / air_diffusivity # Prandtl number unitless
-    Re = np.abs(U_rel) * L / air_viscosity # Reynolds number based on relative air speed unitless
-    Nu = 0.058 * (np.power(Re,0.8)) / (np.power(Pr,0.4)) # Nusselt number
-    HF = (1/L) * (Nu * air_conductivity * (T_air - T_ice)) # HEAT FLUX confused bc this is C and Kelvin in units
+    Parameters
+    ----------
+    air_temp : float or ndarray
+        Air temperature in °C
+    air_velocity_relative : float or ndarray
+        Air speed relative to iceberg in m/s
+    iceberg_length : float
+        Characteristic length of iceberg in meters
     
-    # I should convert temperatures to kelvin and not divide by length to get m/s
+    Returns
+    -------
+    melt_rate : float or ndarray
+        Melt rate in m/s (0 if air_temp < 0°C)
     
-    # melt rate in m/s
-    # not sure how this is m/s
-    melt = HF / (rho_i * Li)
+    Notes
+    -----
+    Uses Nusselt-Reynolds-Prandtl relationship for forced convection
+    """
+    is_freezing = air_temp < 0
     
-    if cold:
-        melt = 0
+    # Dimensionless numbers
+    prandtl_number = const.PRANDTL_NUMBER
+    reynolds_number = np.abs(air_velocity_relative) * iceberg_length / const.AIR_KINEMATIC_VISCOSITY
     
-    return melt
+    # Nusselt number: Nu = 0.058 * Re^0.8 / Pr^0.4
+    nusselt_number = (const.NUSSELT_COEFF * 
+                     np.power(reynolds_number, const.NUSSELT_REYNOLDS_EXPONENT) / 
+                     np.power(prandtl_number, const.NUSSELT_PRANDTL_EXPONENT))
+    
+    # Heat flux: Q = (Nu * k / L) * (T_air - T_ice)
+    heat_flux = ((nusselt_number * const.AIR_THERMAL_CONDUCTIVITY / iceberg_length) * 
+                 (air_temp - const.ICE_SURFACE_TEMPERATURE))
+    
+    # Convert heat flux to melt rate: m = Q / (ρ * L)
+    melt_rate = heat_flux / (const.RHO_ICE * const.LATENT_HEAT_FUSION)
+    
+    # No melting if air temperature is below freezing
+    if np.isscalar(is_freezing):
+        if is_freezing:
+            melt_rate = 0
+    else:
+        melt_rate = np.where(is_freezing, 0, melt_rate)
+    
+    return melt_rate  # m/s
 
 
-def melt_buoyantwater(T_w, S_w, method, use_constant_tf = False, constant_tf = None):
-   
-        
-    Tf = -0.036 - (0.0499 * S_w) - (0.0001128 * np.power(S_w,2)) # freezing pt of seawater due to S changes
-    Tfp = Tf * np.exp(-0.19 * (T_w - Tf)) # freezing point temperature
+def melt_buoyantwater(water_temp, salinity, method='cis', 
+                      use_constant_tf=False, constant_tf=None):
+    """
+    Calculate buoyant (free) convection melt along vertical walls.
     
+    Uses Bigg et al. (1997) / El-Tahan formulation.
+    
+    Parameters
+    ----------
+    water_temp : float or ndarray
+        Water temperature in °C
+    salinity : float or ndarray
+        Salinity in PSU
+    method : {'bigg', 'cis'}, optional
+        Which formulation to use. Default is 'cis'.
+    use_constant_tf : bool, optional
+        If True, use constant thermal forcing
+    constant_tf : float, optional
+        Constant thermal forcing value
+    
+    Returns
+    -------
+    melt_rate : float or ndarray
+        Melt rate in m/s
+    
+    References
+    ----------
+    Bigg et al. (1997), El-Tahan formulation
+    """
+    # Calculate freezing point temperature
+    # T_f = -0.036 - 0.0499*S - 0.0001128*S²
+    temp_freeze = (const.BIGG_FP_COEFF_1 + 
+                   const.BIGG_FP_COEFF_2 * salinity + 
+                   const.BIGG_FP_COEFF_3 * np.power(salinity, 2))
+    
+    # Adjust freezing point: T_fp = T_f * exp(-0.19 * (T - T_f))
+    freezing_point = temp_freeze * np.exp(const.BIGG_FP_EXPONENT_COEFF * (water_temp - temp_freeze))
+    
+    # Calculate thermal forcing
     if method == 'bigg':
-        
         if use_constant_tf:
-            dT = constant_tf
-            
+            thermal_forcing = constant_tf
         else:
-            dT = T_w
+            thermal_forcing = water_temp
         
-        # not sure how this is m/day
-        mday = 7.62e-3 * dT + 1.3e-3 * np.power(dT,2) # equation 9 Bigg et al., 1997 10.1016/S0165-232X(97)00012-8
-        # equation is from El-Tahan
-        
+        # Melt rate: m = 7.62e-3 * dT + 1.3e-3 * dT² (m/day)
+        melt_rate_per_day = (const.BUOYANT_MELT_LINEAR_COEFF * thermal_forcing + 
+                            const.BUOYANT_MELT_QUADRATIC_COEFF_BIGG * np.power(thermal_forcing, 2))
+    
     elif method == 'cis':
-        
         if use_constant_tf:
-            dT = constant_tf
-            mday = 7.62e-3 * dT + 1.29e-3 * np.power(dT,2)
-            
+            thermal_forcing = constant_tf
+            melt_rate_per_day = (const.BUOYANT_MELT_LINEAR_COEFF * thermal_forcing + 
+                                const.BUOYANT_MELT_QUADRATIC_COEFF_CIS * np.power(thermal_forcing, 2))
         else:
-            dT = T_w - Tfp
-            mday = 7.62e-3 * dT + 1.29e-3 * np.power(dT,2)
+            thermal_forcing = water_temp - freezing_point
+            melt_rate_per_day = (const.BUOYANT_MELT_LINEAR_COEFF * thermal_forcing + 
+                                const.BUOYANT_MELT_QUADRATIC_COEFF_CIS * np.power(thermal_forcing, 2))
     
-    # convert to m/s from m/day
-
-    melt = mday / 86400
+    # Convert from m/day to m/s
+    melt_rate = melt_rate_per_day / const.SECONDS_PER_DAY
     
-    return melt
-
-def keeldepth(L, method):
-    
-    L_10 = np.round(L/10) * 10 # might have issues with this
-    
-    barker_La = L_10 <= 160
-    hotzel_La = L_10 > 160
-    
-    # if nargin==1
-    #     method = 'auto' # idk what this is from
-    
-    if method == 'auto':
-        # not sure about this
-        keel_depth_h = 3.78  * np.power(hotzel_La,0.63) # hotzel
-        keel_depth_b = 2.91 * np.power(barker_La,0.71) # barker
-        
-        return keel_depth_b,keel_depth_h
-        
-    elif method == 'barker':
-        keel_depth = 2.91 * np.power(L_10,0.71)
-        
-        return keel_depth
-    
-    elif method == 'hotzel':
-        keel_depth = 3.78 * np.power(L_10,0.63)
-    
-        return keel_depth
-    
-    elif method == 'constant':
-        keel_depth = 0.7 * L_10
-        
-        return keel_depth
-    
-    elif method == 'mean':
-        
-        keel_arr = np.ones(len(L_10),4)
-
-        keel_arr[barker_La,0] = 2.91 * np.power(barker_La,0.71) # barker # feel like these should just be ind columns?
-        keel_arr[hotzel_La,0] = 3.78 * np.power(hotzel_La,0.63) # hotzel
-        keel_arr[:,1] = 2.91 * np.power(L_10,0.71)
-        keel_arr[:,2] = 3.78 * np.power(L_10,0.63)
-        keel_arr[:,3] = 0.7 * L_10
-        
-        mean = np.mean(keel_arr, axis=1)
-        
-        keel_depth = mean
-        
-        return keel_depth
-
-
-def barker_carea(L, keel_depth, dz, LWratio=1.62, tabular=200, method='barker'):
-    # #
-    # # calculates underwater cross sectional areas using Barker et al. 2004,
-    # # and converts to length underwater (for 10 m thicknesses, this is just CrossArea/10) and sail area for K<200, 
-    # # for icebergs K>200, assumes tabular shape
-    # #
-    # # [CArea, UWlength, SailA] = barker_carea(L)
-    # #
-    # # L is vector of iceberg lengths, 
-    # # K is keel depth
-    # # (if narg<2), then it calculates keel depths from this using keeldepth.m
-    # # dz = layer thickness to use
-    # # LWratio: optional argument, default is 1.62:1 L:W, or specify
-    # #
-    # # all variables in structure "icebergs"
-    # #   CA is cross sectional area of each 10 m layer underwater
-    # #   uwL is length of this 10 m underwater layer
-    # #   Z is depth of layer
-    # #   uwW calculated from length using length to width ratio of 1.62:1
-    # # 
-    # #   also get volumes and masses
-    # #
-    # # first get keel depth
-    
-    keel_depth = np.array([keel_depth])
-    L = np.array([L])
-    if keel_depth == None:
-        keel_depth = keeldepth(L,'barker') # K = keeldepth(L,'mean');
-        dz = 10
-        LWratio = 1.62
-    
-    # table 5
-    if dz == 10: # originally for dz=10 m layers
-        a = [9.51,11.17,12.48,13.6,14.3,13.7,13.5,15.8,14.7,11.8,11.4,10.9,10.5,10.1,9.7,9.3,8.96,8.6,8.3,7.95]
-        
-        
-        
-        a = np.array(a).reshape((len(a),1))
-        
-        b = [25.9,107.5,232,344.6,457,433,520,1112,1125,853,931,1007,1080,1149,1216,1281,1343,1403,1460,1515]
-        b = -1 * (np.array(b).reshape((len(b),1)))
-        
-    elif dz == 5:
-
-        a = [9.51,11.17,12.48,13.6,14.3,13.7,13.5,15.8,14.7,11.8,11.4,10.9,10.5,10.1,9.7,9.3,8.96,8.6,8.3,7.95]
-        a = np.array(a).reshape((len(a),1))
-        
-        b = [25.9,107.5,232,344.6,457,433,520,1112,1125,853,931,1007,1080,1149,1216,1281,1343,1403,1460,1515]
-        b = -1 * (np.array(b).reshape((len(b),1)))
-    
-        # a_lin = a[9:,:]
-        # b_lin = b[9:,:]
-        # model = LinearRegression().fit(a_lin, b_lin)
-        # r_sq = model.score(a_lin, b_lin)
-        
-        # mean = np.mean(np.diff(a_lin,axis=0))
-        # a2 = np.arange(a_lin[-1][0],0,mean).reshape((-1,1))
-        # b2 = model.predict(a2)
-        
-        # a_stack = np.vstack((a,a2[1:,:]))
-        # b_stack = np.vstack((b,b2[1:,:]))
-        
-        
-        aa = np.empty(a.T.shape)
-        aa[0] = a[0]
-        bb = np.empty(b.T.shape)
-        bb[0] = b[0]
-        
-        for i in range(len(a)-1):
-            aa[0,i+1] = np.nanmean(a[i:i+2,:])
-            bb[0,i+1] = np.nanmean(b[i:i+2,:])
-        
-        # kz = keel_depth[0] # keel depth
-        # kza = np.ceil(kz/dz) # layer index for keel depth
-        # newa = np.empty((a.size*2,1)) #np.ceil(kz/dz) instead of 40?
-        newa = np.empty((40,1)) #np.ceil(kz/dz) instead of 40?
-        # if kza <= 40:    
-        #     newa = np.empty((40,1)) #np.ceil(kz/dz) instead of 40?
-        # elif kza > 40:
-        #     newa = np.empty((int(kza),1)) #np.ceil(kz/dz) instead of 40?
-
-        newa[:] = np.nan
-        newb = newa.copy()
-        
-        newa[::2] = aa.T
-        newa[1::2] = a
-        
-        newb[::2] = bb.T
-        newb[1::2] = b
-        
-        a = newa/2
-        b = newb/2
-    
-    a_s = 28.194; # for sail area table 4 barker et al 2004
-    b_s = -1420.2;    
-    
-    
-
-    
-    
-    
-    # initialize arrays
-    # icebergs.Z = dz:dz:500; icebergs.Z=icebergs.Z';
-    # zlen = length(icebergs.Z);
-    # temp = nan.*ones(zlen,length(L));  # 100 layers of 5-m each, so up to 500 m deep berg
-    # temps = nan.*ones(1,length(L));  # sail area
-    
-    z_coord_flat = np.arange(dz,600+dz,dz) # deepest iceberg is defined here 
-    z_coord = z_coord_flat.reshape(len(z_coord_flat),1)
-    depth_layers = xr.DataArray(data=z_coord, coords = {"Z":z_coord_flat},  dims=["Z","X"], name="Z")
-    zlen = len(depth_layers.Z)
-    # temp = nan.*ones(zlen,length(L))
-    # need to make L an array
-    
-    temp = np.nan * np.ones((zlen, len(L)))
-    temps = np.nan * np.ones((1, len(L)))
-    
-    
-    # K_l200 = keel_depth[keel_depth<200] # might cause an issue?
-    K_ltab = np.where(keel_depth<=tabular)[0] # get indices of keel_depth < tabular
-    # if(~isempty(ind))
-    if K_ltab.size != 0: # check if empty
-        for i in range(len(K_ltab)):
-            
-            kz = keel_depth[i] # keel depth
-            # dz_np = np.array([dz],dtype=np.float64)
-            kza = np.ceil(kz/dz) # layer index for keel depth
-            # kza = ceil(kz,dz) # layer index for keel depth
-            
-            for nl in range(int(kza)):
-                temp[nl,i] = a[nl] * L[K_ltab[i]] + b[nl]
-                
-        temps[K_ltab] = a_s * L[K_ltab] + b_s
-        
-        if L < 65:
-            temps[L<65] = 0.077 * np.power(L[L<65],2) # fix for L<65, barker 2004
-    
-    
-    # then do icebergs D>200 for tabular
-    K_gtab = np.where(keel_depth>tabular)[0]
-    if K_gtab.size != 0:
-        for i in range(len(K_gtab)):
-            
-            kz = keel_depth[i] # keel depth
-            kza = np.ceil(kz/dz) # layer index for keel depth
-            
-            for nl in range(int(kza)):
-                # temp[nl,i] = a[nl] * L[K_g200[i]] + b[nl]
-                temp[nl,i] = L[K_gtab[i]] * dz
-        
-        temps[K_gtab] = 0.1211 * L[K_gtab] * keel_depth[K_gtab]
-        
-    
-    cross_area = xr.DataArray(data=temp, coords = {"Z":z_coord_flat}, dims=["Z","X"], name="cross_area")
-    # icebergs.uwL = temp./dz; 
-    length_layers = xr.DataArray(data=temp/dz, coords = {"Z":z_coord_flat},  dims=["Z","X"], name="uwL")
-    
-    # now use L/W ratio of 1.62:1 (from Dowdeswell et al.) to get widths I wonder if I can just get widths from Sid's data??
-    widths = length_layers.values / LWratio 
-    width_layers = xr.DataArray(data = widths, coords = {"Z":z_coord_flat},  dims=["Z","X"], name="uwW")
-    
-    dznew = dz * np.ones(length_layers.values.shape);
-    
-    vol = dznew * length_layers.values * width_layers.values
-    volume = xr.DataArray(data=vol, coords = {"Z":z_coord_flat},  dims=["Z","X"], name="uwV")
-    
-    # I am ASSUMING everything is the same size. NEED TO CHECK when I get things running
-    icebergs = xr.Dataset(data_vars={'depth':depth_layers,
-                                     'cross_area':cross_area,
-                                     'uwL':length_layers,
-                                     'uwW':width_layers,
-                                     'uwV':volume},
-                          coords = {'Z': z_coord_flat}
-                          )
-
-    
-    return icebergs
-
-def init_iceberg_size(L, dz=10, stability_method='equal',quiet=True):
-    # # initialize iceberg size and shapes, based on length
-    # # 
-    # # given L, outputs all other iceberg parameters
-    # # dz : specify layer thickness desired, default is 10m
-    # #
-    # # Updated to make stable using Wagner et al. threshold, Sept 2017
-    # # either load in lengths L or specify here
-    # #L = [100:50:1000]';
-    # stablility method 'keel' or 'equal' 
-    # keel changes keel depth, equal makes width and length equal
-    
-    keel_depth = keeldepth(L, 'barker')
-    
-    # now get underwater shape, based on Barker for K<200, tabular for K>200, and 
-    ice = barker_carea(L, keel_depth, dz) # LWratio = 1.62 this gives you uwL, uwW, uwV, uwM, and vector Z down to keel depth
-    
-    # from underwater volume, calculate above water volume
-    rho_i = 917 #kg/m3
-    rat_i = rho_i/1024 # ratio of ice density to water density
-    
-    total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
-    sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
-    
-    waterline_width = L/1.62
-    freeB = sail_volume / (L * waterline_width) # Freeboard height
-    # length = L.copy()
-    thickness = keel_depth + freeB # total thickness
-    deepest_keel = np.ceil(keel_depth/dz) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
-    # dz = dzS
-    dzk = -1*((deepest_keel - 1) * dz - keel_depth) #
-    
-    # check if stable
-    stability_thresh = 0.92 # from Wagner et al. 2017, if W/H < 0.92 then unstable
-    stable_check = waterline_width / thickness[0]
-    
-    if stable_check > stability_thresh:
-            ice['totalV'] = xr.DataArray(data=total_volume[0],name='totalV')
-            ice['sailV'] = xr.DataArray(data=sail_volume[0], name='sailV')
-            ice['W'] = xr.DataArray(waterline_width, name='W')
-            ice['freeB'] = xr.DataArray(freeB[0],name='freeB')
-            ice['L'] = xr.DataArray(np.float64(L),name='L')
-            ice['keel'] = xr.DataArray(data=keel_depth, name='keel')
-            ice['TH'] = xr.DataArray(data=thickness[0], name='thickness')
-            ice['keeli'] = xr.DataArray(data=deepest_keel, name='keeli')
-            ice['dz'] = xr.DataArray(data=dz, name='dz')
-            ice['dzk'] = xr.DataArray(data=dzk, name='dzk')
-            
-            return ice
-    
-    
-    if stable_check < stability_thresh:
-        # Not sure when to use either? MATLAB code has if(0) and if(1) for 'keel' and 'equal'
-        if stability_method == 'keel':
-            # change keeldepth to be shallower
-            # if quiet == False:
-            #     print(f'Fixing keel depth for L = {L} m size class')
-                
-            
-            diff_thick_width = thickness - waterline_width # Get stable thickness
-            keel_new = keel_depth - rat_i * diff_thick_width # change by percent of difference
-            
-            ice = barker_carea(L,keel_new,dz)
-            total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
-            sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
-            waterline_width = L/1.62 
-            freeB = sail_volume / (L * waterline_width) # Freeboard height
-            # length = L.copy()
-            thickness = keel_depth + freeB # total thickness
-            deepest_keel = np.ceil(keel_depth/dz) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
-            # dz = dzS
-            dzk = -1*((deepest_keel - 1) * dz - keel_depth) #
-            stability = waterline_width/thickness
-            
-            ice['totalV'] = xr.DataArray(data=total_volume[0],name='totalV')
-            ice['sailV'] = xr.DataArray(data=sail_volume[0], name='sailV')
-            ice['W'] = xr.DataArray(waterline_width, name='W')
-            ice['freeB'] = xr.DataArray(freeB[0],name='freeB')
-            ice['L'] = xr.DataArray(np.float64(L),name='L')
-            ice['keel'] = xr.DataArray(data=keel_depth, name='keel')
-            ice['TH'] = xr.DataArray(data=thickness[0], name='thickness')
-            ice['keeli'] = xr.DataArray(data=deepest_keel, name='keeli')
-            ice['dz'] = xr.DataArray(data=dz, name='dz')
-            ice['dzk'] = xr.DataArray(data=dzk, name='dzk')
-            
-            return ice
-        
-        elif stability_method == 'equal':
-            # change W to equal L, recalculate volumes
-            if quiet == False:
-                print(f'Fixing width to equal L, for L = {L} m size class')
-            # use L:W ratio of to make stable, set so L:W makes EC=EC_thresh
-            
-            width_temporary = stability_thresh * thickness[0]
-            lw_ratio = np.floor((100*L)/width_temporary)/100 # round down to hundredth place
-            
-            ice = barker_carea(L, keel_depth, dz, LWratio=lw_ratio)
-            
-            total_volume = (1/rat_i) * np.nansum(ice.uwV,axis=0) #double check axis need rows, ~87% of ice underwater
-            sail_volume = total_volume - np.nansum(ice.uwV,axis=0) # sail volume is above water volune
-            waterline_width = L / lw_ratio 
-            freeB = sail_volume / (L * waterline_width) # Freeboard height
-            # length = L.copy()
-            thickness = keel_depth + freeB # total thickness
-            deepest_keel = np.ceil(keel_depth/dz) # index of deepest iceberg layer, % ice.keeli = round(K./dz)
-            # dz = dzS
-            dzk = -1*((deepest_keel - 1) * dz - keel_depth) #
-
-            
-            ice['totalV'] = xr.DataArray(data=total_volume[0],name='totalV')
-            ice['sailV'] = xr.DataArray(data=sail_volume[0], name='sailV')
-            ice['W'] = xr.DataArray(waterline_width, name='W')
-            ice['freeB'] = xr.DataArray(freeB[0],name='freeB')
-            ice['L'] = xr.DataArray(np.float64(L),name='L')
-            ice['keel'] = xr.DataArray(data=keel_depth, name='keel')
-            ice['TH'] = xr.DataArray(data=thickness[0], name='thickness')
-            ice['keeli'] = xr.DataArray(data=deepest_keel, name='keeli')
-            ice['dz'] = xr.DataArray(data=dz, name='dz')
-            ice['dzk'] = xr.DataArray(data=dzk, name='dzk')
-            EC = ice.W/ice.TH
-            
-            if EC < stability_thresh:
-                raise Exception("Still unstable, check W/H ratios")
-            
-            return ice
-        
-
-def heat_flux():
-    
-    # do I take the mean per depth of the heat flux? 
-    # I guess I can do both an averaged 
-    
-    
-    return
+    return melt_rate
 
 
 def iceberg_melt(L,dz,timespan,ctddata,IceConc,WindSpd,Tair,SWflx,Urelative, do_constantUrel=False, factor=4, quiet=True,
@@ -1011,6 +757,21 @@ def iceberg_melt(L,dz,timespan,ctddata,IceConc,WindSpd,Tair,SWflx,Urelative, do_
 
 
 
-"""
 
-"""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
