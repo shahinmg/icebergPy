@@ -25,9 +25,13 @@ gdf_list = sorted([gdf for gdf in os.listdir(gdf_pkl_path) if gdf.endswith('gpkg
 out_dir = '../../data/'
 
 
-vel_dict = {'min': 0.02,
-            'avg': 0.07,
-            'max':0.15} #m/s
+# vel_dict = {'min': 0.02,
+#             'avg': 0.07,
+#             'max':0.15} #m/s
+
+vel_dict = {'min': 0.07,
+            'avg': 0.13,
+            'max':0.20} #m/s
 
 
 for berg_file in gdf_list:
@@ -122,8 +126,8 @@ for berg_file in gdf_list:
             Qib_dict[length] = Qib
             total_melt_dict[length] = total_iceberg_melt
         
-
-        op_berg_model = f'{out_dir}iceberg_classes_output_bug_fix/{FJORD}/{run_type}/'
+        u_rel_str= str(u_rel).replace('.', '')
+        op_berg_model = f'{out_dir}iceberg_classes_output_bug_fix/{FJORD}/{run_type}_{u_rel_str}/'
         if not os.path.exists(op_berg_model):
             os.makedirs(op_berg_model)
             
@@ -219,7 +223,7 @@ for berg_file in gdf_list:
         
         urel_str = str(u_rel).split('.')[1]
         
-        op = f'{out_dir}iceberg_model_output_bug_fix/{FJORD}/{run_type}/'
+        op = f'{out_dir}iceberg_model_output_bug_fix/{FJORD}/{run_type}_{u_rel_str}/'
         if not os.path.exists(op):
             os.makedirs(op)
         
