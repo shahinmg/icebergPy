@@ -260,16 +260,16 @@ def calculate_ensemble_statistics(
         
         count = size_counts[length]
         
-        # Heat flux below AWW depth
-        heat_flux, total_melt = calculate_heat_flux(results, aww_depth)
+        # Heat flux below AWW depth (using day 2)
+        heat_flux, total_melt = calculate_heat_flux(results, aww_depth, day=2)
         heat_flux_sum = float(np.nansum(heat_flux.sel(Z=slice(aww_depth, None))))
         melt_sum = float(np.nansum(total_melt.sel(Z=slice(aww_depth, None))))
         
         heat_flux_totals[length] = heat_flux_sum * count
         melt_totals[length] = melt_sum * count
         
-        # Volume below AWW depth
-        vol = results.UWVOL.sel(Z=slice(aww_depth, None))
+        # Volume below AWW depth (using INITIAL geometry)
+        vol = results.uwV.sel(Z=slice(aww_depth, None))  # CORRECTED: uwV not UWVOL
         vol_sum = float(np.nansum(vol))
         volume_totals[length] = vol_sum * count
     
@@ -307,7 +307,6 @@ def calculate_ensemble_statistics(
         'melt_by_class': melt_totals,
         'volume_by_class': volume_totals
     }
-
 
 def save_results(
     melt_dict: dict,
