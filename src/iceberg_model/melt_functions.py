@@ -49,7 +49,7 @@ def melt_solar(solar_rad):
     # % - note assumes iceberg albedo is 0.7
     # % 
 
-    latent_heat = 3.33e5 #J/kg
+    latent_heat = 3.35e5 #J/kg
     rho_i = 917 #kg/m3
     albedo = 0.7
     absorbed = 1 - albedo # percentage absorbed
@@ -128,7 +128,7 @@ def melt_forcedwater(temp_far, salinity_far, pressure_base, U_rel, factor, use_c
 def melt_forcedair(T_air, U_rel, L):
     
     T_ice = -4 # ice temperature
-    Li = 3.33e5 # latent heat of fusion in ice J/kg
+    Li = 3.35e5 # latent heat of fusion in ice J/kg
     rho_i = 917 # density of ice
     air_viscosity = 1.46e-5 # kinematic viscosity of air m2/s idk at what temperature around 15 c
     air_diffusivity = 2.16e-5 # thermal diffusivity of air m2/s
