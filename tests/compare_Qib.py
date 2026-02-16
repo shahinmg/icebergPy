@@ -13,7 +13,7 @@ import os
 
 class_berg_path = '/home/laserglaciers/icebergPy/data/test_class_outputs/iceberg_model_output/helheim/avg/2016-04-24_helheim_coeff_1_CTD_constant_UREL_07.nc'
 
-old_berg_path = '/home/laserglaciers/icebergPy/data/iceberg_model_output/helheim/avg/2016-04-24_helheim_coeff_1_CTD_constant_UREL_07.nc'
+old_berg_path = '/home/laserglaciers/icebergPy/data/iceberg_model_output_bug_fix/helheim/avg/2016-04-24_helheim_coeff_1_CTD_constant_UREL_07.nc'
 
 
 class_berg_ds = xr.open_dataset(class_berg_path)
