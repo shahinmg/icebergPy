@@ -4,6 +4,8 @@ Physical and Model Constants for Iceberg Simulations
 This module contains all physical constants, empirical parameters, and 
 configuration values used in the iceberg geometry and melt model.
 
+Constants follow PEP 8 convention of SCREAMING_SNAKE_CASE to indicate
+they should not be modified during runtime.
 
 References
 ----------

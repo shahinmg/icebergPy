@@ -1158,15 +1158,13 @@ def iceberg_melt_refactored(
                 melt_frac_above = melt_frac_below = 0
             
             if do_melt['turbw']:
-                # Use geometry from previous timestep
-                # j starts at 1, so j-1 is always valid
-                uwL_current = arrays['UWL'][:, i, j-1]
-                uwW_current = arrays['UWW'][:, i, j-1]
-                
+                # Use CURRENT geometry (before applying melt this timestep)
+                # This matches original line 780 which uses uwL[k] before line 851 updates it
+                # Flatten to 1D since functions expect 1D arrays
                 arrays['melt_rate_forced_water'][:, i, j], arrays['Mturbw'][:, i, j] = \
                     _calculate_forced_water_melt(
                         keel_layer_index, depths, temperature, salinity,
-                        velocity[:, i, j], uwL_current, uwW_current,
+                        velocity[:, i, j], underwater_length.flatten(), underwater_width.flatten(),
                         dz, keel, timestep_seconds, factor, use_constant_tf, constant_tf
                     )
             
@@ -1181,15 +1179,13 @@ def iceberg_melt_refactored(
                     _calculate_solar_melt(solar_radiation[j], length, width, timestep_seconds)
             
             if do_melt['freew']:
-                # Use geometry from previous timestep
-                # j starts at 1, so j-1 is always valid
-                uwL_current = arrays['UWL'][:, i, j-1]
-                uwW_current = arrays['UWW'][:, i, j-1]
-                
+                # Use CURRENT geometry (before applying melt this timestep)
+                # This matches original line 827 which uses uwL[k] before line 851 updates it
+                # Flatten to 1D since functions expect 1D arrays
                 arrays['melt_rate_buoyant'][:, i, j], arrays['Mfreew'][:, i, j] = \
                     _calculate_buoyant_melt(
                         keel_layer_index, depths, temperature, salinity,
-                        uwL_current, uwW_current,
+                        underwater_length.flatten(), underwater_width.flatten(),
                         dz, keel, timestep_seconds, use_constant_tf, constant_tf
                     )
             
