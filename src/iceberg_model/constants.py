@@ -4,6 +4,7 @@ Physical and Model Constants for Iceberg Simulations
 This module contains all physical constants, empirical parameters, and 
 configuration values used in the iceberg geometry and melt model.
 
+
 References
 ----------
 - Moon, T., et al. (2018). Nature Geoscience, 11(1), 49-54.
@@ -21,16 +22,15 @@ References
 # Densities (kg/m³)
 RHO_ICE = 917                  # Density of glacial ice
 RHO_SEAWATER = 1024           # Typical seawater density
-RHO_FRESHWATER = 1000         # fresh water
-RHO_AIR = 1.225               # Air density at sea level
+RHO_FRESHWATER = 1000         # Pure water at 4°C
+RHO_AIR = 1.225               # Air density at sea level, 15°C
 
 # Derived density ratios
 DENSITY_RATIO_ICE_TO_WATER = RHO_ICE / RHO_SEAWATER  # ~0.895 (89.5% submerged)
 DENSITY_RATIO_ICE_TO_FRESHWATER = RHO_ICE / RHO_FRESHWATER  # ~0.917
 
 # Thermal properties
-LATENT_HEAT_FUSION = 3.33e5   # J/kg - latent heat of fusion (ice→water)
-LATENT_HEAT_FUSION_ALT = 3.35e5  # J/kg - alternative value used in some formulations
+LATENT_HEAT_FUSION = 3.35e5   # J/kg - latent heat of fusion (ice→water) - CORRECTED to match original
 SPECIFIC_HEAT_ICE = 2009      # J/(kg·K) - specific heat capacity of ice
 SPECIFIC_HEAT_WATER = 3974    # J/(kg·K) - specific heat capacity of water
 
@@ -49,7 +49,7 @@ AIR_THERMAL_DIFFUSIVITY = 2.16e-5  # m²/s - thermal diffusivity of air
 AIR_THERMAL_CONDUCTIVITY = 0.0249  # W/(m·K) - thermal conductivity at 0°C
 
 # ==============================================================================
-# EMPIRICAL PARAMETERS 
+# EMPIRICAL PARAMETERS (from literature)
 # ==============================================================================
 
 # Barker et al. (2004) - Keel depth models
@@ -99,7 +99,7 @@ HEAT_TRANSFER_COEFFICIENT_GT = 1.1e-3   # Heat transfer coefficient (can be scal
 SALT_TRANSFER_COEFFICIENT_GS = 3.1e-5   # Salt transfer coefficient (can be scaled by factor)
 
 # Jackson et al. (2020) - Adjustment factor for transfer coefficients
-DEFAULT_TRANSFER_COEFFICIENT_FACTOR = 1  # Multiplicative factor for GT and GS
+DEFAULT_TRANSFER_COEFFICIENT_FACTOR = 4  # Multiplicative factor for GT and GS
 
 # Freezing point calculation coefficients
 FREEZING_POINT_SALINITY_COEFF = -5.73e-2    # °C/PSU - salinity contribution (a)

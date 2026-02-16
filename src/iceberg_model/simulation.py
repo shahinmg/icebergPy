@@ -122,7 +122,7 @@ class IcebergMeltSimulation:
         self,
         timespan: float,
         do_constant_velocity: bool = False,
-        transfer_coeff_factor: float = 1.0,
+        transfer_coeff_factor: float = 1.0,  # Changed from 4.0 to 1.0 (standard physics)
         do_roll: bool = True,
         do_slab: bool = True,
         use_constant_tf: bool = False,
@@ -143,8 +143,9 @@ class IcebergMeltSimulation:
         do_constant_velocity : bool, optional
             If True, use constant water velocity. Default is False.
         transfer_coeff_factor : float, optional
-            Adjustment factor for heat/salt transfer coefficients
-            (Jackson et al. 2020). Default is 4.0.
+            Adjustment factor for heat/salt transfer coefficients.
+            Default is 1.0 (standard Holland & Jenkins 1999 values).
+            Use 4.0 for Jackson et al. 2020 adjusted values.
         do_roll : bool, optional
             Enable iceberg rolling when unstable. Default is True.
         do_slab : bool, optional
@@ -584,13 +585,14 @@ def _calculate_forced_water_melt(
     melt_volumes : ndarray
         Integrated melt volumes by depth (nz_iceberg,) - sized to iceberg layers
     """
-    # Size arrays to iceberg depth levels, not CTD depths
+    # Size arrays to iceberg depth levels
     nz_iceberg = len(velocity)
     melt_rates = np.zeros(nz_iceberg)
     melt_volumes = np.zeros(nz_iceberg)
     
     # Calculate iceberg depth coordinates for interpolation
-    iceberg_depths = np.arange(nz_iceberg) * dz
+    # Use cell centers like original: [dz, 2*dz, 3*dz, ...] not [0, dz, 2*dz, ...]
+    iceberg_depths = np.arange(1, nz_iceberg + 1) * dz  # [5, 10, 15, ...] for dz=5
     
     # Full layers
     for k in range(keel_layer_index - 1):
@@ -705,8 +707,8 @@ def _calculate_buoyant_melt(
     melt_rates = np.zeros(nz_iceberg)
     melt_volumes = np.zeros(nz_iceberg)
     
-    # Calculate iceberg depth coordinates
-    iceberg_depths = np.arange(nz_iceberg) * dz
+    # Calculate iceberg depth coordinates (cell centers like original)
+    iceberg_depths = np.arange(1, nz_iceberg + 1) * dz  # [5, 10, 15, ...] for dz=5
     
     # Full layers
     for k in range(keel_layer_index - 1):
@@ -811,26 +813,45 @@ def _apply_buoyancy_adjustment(
     length: float,
     width: float,
     thickness: float,
+    freeboard: float,
     underwater_volume: np.ndarray
 ) -> Tuple[float, float, float, float]:
     """
     Adjust geometry for buoyancy equilibrium.
     
+    Matches original melt_functions.py lines 876-881
+    
+    Parameters
+    ----------
+    freeboard : float
+        Current freeboard (needed for sailV calculation)
+    
     Returns
     -------
     freeboard : float
+        Adjusted freeboard
     keel : float
+        Adjusted keel
     sail_volume : float
+        Adjusted sail volume
     total_volume : float
+        Total iceberg volume
     """
     density_ratio = const.DENSITY_RATIO_ICE_TO_WATER
     
-    sail_volume = thickness * length * width - np.nansum(underwater_volume)
+    # Line 876: sailV = freeB * L * W
+    sail_volume = freeboard * length * width
+    
+    # Line 877: totalV = np.nansum(uwV) + sailV
     total_volume = np.nansum(underwater_volume) + sail_volume
     
-    # Adjust for buoyancy
+    # Line 879: sailV = (1 - ratio_i) * totalV
     sail_volume = (1 - density_ratio) * total_volume
+    
+    # Line 880: freeB = sailV / (L * W)
     freeboard = sail_volume / (length * width) if (length * width) > 0 else 0
+    
+    # Line 881: keel = TH - freeB
     keel = thickness - freeboard
     
     return freeboard, keel, sail_volume, total_volume
@@ -927,7 +948,7 @@ def _package_results(
     Mfreea = (density_ratio * arrays['Mfreea']) / timestep
     Mturbw = (density_ratio * arrays['Mturbw']) / timestep
     Mturba = (density_ratio * arrays['Mturba']) / timestep
-    Mfreew = (density_ratio * arrays['Mfreew']) / timestep
+    Mfreew = (density_ratio * arrays['Mfreew']) / timestep  # FIXED: Now using correct Mfreew data
     
     # Total melt
     ni, nt = arrays['Mwave'].shape
@@ -985,6 +1006,12 @@ def _package_results(
     for var in ['UWL', 'UWVOL', 'UWW']:
         results[var] = xr.DataArray(arrays[var], coords={"time": time, "Z": ice_init[0].Z.values},
                                    dims=["Z", "X", "time"])
+    
+    # Add initial geometry (2D, no time dimension) for compatibility with original code
+    results['uwL'] = ice_init[0].uwL  # Initial underwater length
+    results['uwW'] = ice_init[0].uwW  # Initial underwater width
+    results['uwV'] = ice_init[0].uwV  # Initial underwater volume
+    results['depth'] = ice_init[0].depth  # Depth coordinate
     
     results['Urel'] = xr.DataArray(velocity_unadjusted, 
                                    coords={"time": time, "Z": ice_init[0].Z.values},
@@ -1131,10 +1158,15 @@ def iceberg_melt_refactored(
                 melt_frac_above = melt_frac_below = 0
             
             if do_melt['turbw']:
+                # Use geometry from previous timestep
+                # j starts at 1, so j-1 is always valid
+                uwL_current = arrays['UWL'][:, i, j-1]
+                uwW_current = arrays['UWW'][:, i, j-1]
+                
                 arrays['melt_rate_forced_water'][:, i, j], arrays['Mturbw'][:, i, j] = \
                     _calculate_forced_water_melt(
                         keel_layer_index, depths, temperature, salinity,
-                        velocity[:, i, j], underwater_length[:, 0], underwater_width[:, 0],
+                        velocity[:, i, j], uwL_current, uwW_current,
                         dz, keel, timestep_seconds, factor, use_constant_tf, constant_tf
                     )
             
@@ -1149,10 +1181,15 @@ def iceberg_melt_refactored(
                     _calculate_solar_melt(solar_radiation[j], length, width, timestep_seconds)
             
             if do_melt['freew']:
+                # Use geometry from previous timestep
+                # j starts at 1, so j-1 is always valid
+                uwL_current = arrays['UWL'][:, i, j-1]
+                uwW_current = arrays['UWW'][:, i, j-1]
+                
                 arrays['melt_rate_buoyant'][:, i, j], arrays['Mfreew'][:, i, j] = \
                     _calculate_buoyant_melt(
                         keel_layer_index, depths, temperature, salinity,
-                        underwater_length[:, 0], underwater_width[:, 0],
+                        uwL_current, uwW_current,
                         dz, keel, timestep_seconds, use_constant_tf, constant_tf
                     )
             
@@ -1167,9 +1204,12 @@ def iceberg_melt_refactored(
                 melt_frac_above, melt_frac_below, keel_layer_index, dz
             )
             
+            # Update thickness with post-melt values
+            thickness = keel + freeboard
+            
             # Apply buoyancy
             freeboard, keel, sail_volume, total_volume = _apply_buoyancy_adjustment(
-                length, width, thickness, underwater_volume
+                length, width, thickness, freeboard, underwater_volume
             )
             
             thickness = keel + freeboard
