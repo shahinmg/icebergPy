@@ -21,7 +21,7 @@ import types
 import os
 import string
 
-berg_model_path_1 = '../data/iceberg_classes_output_bug_fix/helheim/avg/'
+berg_model_path_1 = '../data/iceberg_classes_output_bug_fix/helheim/avg_013/'
 
 iceberg_geom_path = '../data/iceberg_geoms/helheim/'
 

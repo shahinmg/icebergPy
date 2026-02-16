@@ -727,6 +727,17 @@ def _calculate_buoyant_melt(
     # Partial keel layer
     if keel_layer_index > 0:
         k = keel_layer_index - 1
+        
+        # Calculate melt rate for partial layer (was missing!)
+        T_far = interp1d(depths, temperature)(iceberg_depths[k])
+        S_far = interp1d(depths, salinity)(iceberg_depths[k])
+        
+        melt_rates[k] = melt.melt_buoyantwater(
+            T_far, S_far, 'cis',
+            use_constant_tf=use_constant_tf, constant_tf=constant_tf
+        )
+        melt_rates[k] *= timestep
+        
         dz_keel = -1 * ((keel_layer_index - 1) * dz - keel)
         melt_volumes[k] = (const.BUOYANT_WATER_LENGTH_SURFACES * melt_rates[k] * dz_keel * underwater_length[k] +
                           const.BUOYANT_WATER_WIDTH_SURFACES * melt_rates[k] * dz_keel * underwater_width[k])
@@ -774,14 +785,21 @@ def _update_geometry_from_melt(
     # Update horizontal dimensions (melt from both sides)
     mult = 2
     
-    underwater_length[0] = underwater_length[0] - mult * melt_rate_wave * melt_fraction_below
+    # Note: In MATLAB original, wave melt is applied to ALL underwater layers
+    # Line 555: uwL(k) = uwL(k) - (scale .* mtw(k,j)) - (scale .* mb(k,j)) - (scale .* mw(j))
+    # So we need to include wave melt in the loop below, not just for layer 0
+    
     length = length - mult * melt_rate_forced_air - mult * melt_rate_wave * melt_fraction_above
     
     # Update underwater lengths
-    for k in range(keel_layer_index + 1):
+    # MATLAB: for k=1:iKeel (indices 1 to iKeel in 1-based indexing)
+    # Python: for k in range(iKeel) (indices 0 to iKeel-1 in 0-based indexing)
+    # Since our keel_layer_index is already 1-indexed (from ceil), we use range(keel_layer_index)
+    for k in range(keel_layer_index):
         underwater_length[k] = (underwater_length[k] - 
                                mult * melt_rate_forced_water[k] - 
-                               mult * melt_rate_buoyant[k])
+                               mult * melt_rate_buoyant[k] -
+                               mult * melt_rate_wave)
     
     # Maintain L:W ratio
     underwater_width = underwater_length / const.DEFAULT_LENGTH_TO_WIDTH_RATIO
@@ -958,12 +976,20 @@ def _package_results(
                        np.nansum(Mturbw[:, i, :], axis=0) +
                        np.nansum(Mfreew[:, i, :], axis=0))
     
-    # Mean melt rate
-    mean_melt = (np.nanmean(arrays['melt_rate_wave']) + 
-                np.nanmean(arrays['melt_rate_buoyant']) +
-                np.nanmean(arrays['melt_rate_solar']) + 
-                np.nanmean(arrays['melt_rate_forced_air']) +
-                np.nanmean(arrays['melt_rate_forced_water']))
+    # Mean melt rate (matching original calculation exactly)
+    # Original: i_mtotalm = np.nanmean(mw) + np.nanmean(mb) + np.nanmean(ms) + np.nanmean(ma) + np.nanmean(mtw)
+    # 
+    # IMPORTANT: Arrays have index 0 filled with zeros (never updated in loop which starts at j=1)
+    # We must exclude index 0 when calculating means, or use only indices 1:nt
+    # The loop is: for j in range(1, nt), so indices 1 to nt-1 are filled
+    #
+    # For 2D arrays (ni, nt): select [:, 1:]
+    # For 3D arrays (nz, ni, nt): select [:, :, 1:]
+    mean_melt = (np.nanmean(arrays['melt_rate_wave'][:, 1:]) +          # mw: wave (2D)
+                np.nanmean(arrays['melt_rate_buoyant'][:, :, 1:]) +     # mb: buoyant (3D) 
+                np.nanmean(arrays['melt_rate_solar'][:, 1:]) +          # ms: solar (2D)
+                np.nanmean(arrays['melt_rate_forced_air'][:, 1:]) +     # ma: forced air (2D)
+                np.nanmean(arrays['melt_rate_forced_water'][:, :, 1:]))  # mtw: forced water (3D)
     
     # Create Dataset
     results = xr.Dataset()
@@ -1146,6 +1172,11 @@ def iceberg_melt_refactored(
         for j in range(1, nt):
             keel_layer_index = int(np.ceil(keel / dz))
             
+            # Save geometry at START of this timestep (before applying melt)
+            # This matches original which calculates Mturbw using uwL before updating it
+            uwL_start = underwater_length.flatten().copy()
+            uwW_start = underwater_width.flatten().copy()
+            
             # Calculate melt for each mechanism
             if do_melt['wave']:
                 (arrays['melt_rate_wave'][i, j], arrays['Mwave'][i, j], 
@@ -1158,13 +1189,12 @@ def iceberg_melt_refactored(
                 melt_frac_above = melt_frac_below = 0
             
             if do_melt['turbw']:
-                # Use CURRENT geometry (before applying melt this timestep)
+                # Use geometry from START of this timestep (before melt applied)
                 # This matches original line 780 which uses uwL[k] before line 851 updates it
-                # Flatten to 1D since functions expect 1D arrays
                 arrays['melt_rate_forced_water'][:, i, j], arrays['Mturbw'][:, i, j] = \
                     _calculate_forced_water_melt(
                         keel_layer_index, depths, temperature, salinity,
-                        velocity[:, i, j], underwater_length.flatten(), underwater_width.flatten(),
+                        velocity[:, i, j], uwL_start, uwW_start,
                         dz, keel, timestep_seconds, factor, use_constant_tf, constant_tf
                     )
             
@@ -1179,13 +1209,12 @@ def iceberg_melt_refactored(
                     _calculate_solar_melt(solar_radiation[j], length, width, timestep_seconds)
             
             if do_melt['freew']:
-                # Use CURRENT geometry (before applying melt this timestep)
+                # Use geometry from START of this timestep (before melt applied)
                 # This matches original line 827 which uses uwL[k] before line 851 updates it
-                # Flatten to 1D since functions expect 1D arrays
                 arrays['melt_rate_buoyant'][:, i, j], arrays['Mfreew'][:, i, j] = \
                     _calculate_buoyant_melt(
                         keel_layer_index, depths, temperature, salinity,
-                        underwater_length.flatten(), underwater_width.flatten(),
+                        uwL_start, uwW_start,
                         dz, keel, timestep_seconds, use_constant_tf, constant_tf
                     )
             
