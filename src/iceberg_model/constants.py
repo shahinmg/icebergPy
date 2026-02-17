@@ -101,7 +101,7 @@ HEAT_TRANSFER_COEFFICIENT_GT = 1.1e-3   # Heat transfer coefficient (can be scal
 SALT_TRANSFER_COEFFICIENT_GS = 3.1e-5   # Salt transfer coefficient (can be scaled by factor)
 
 # Jackson et al. (2020) - Adjustment factor for transfer coefficients
-DEFAULT_TRANSFER_COEFFICIENT_FACTOR = 4  # Multiplicative factor for GT and GS
+DEFAULT_TRANSFER_COEFFICIENT_FACTOR = 1  # Multiplicative factor for GT and GS
 
 # Freezing point calculation coefficients
 FREEZING_POINT_SALINITY_COEFF = -5.73e-2    # °C/PSU - salinity contribution (a)
